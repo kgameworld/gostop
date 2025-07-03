@@ -1,6 +1,7 @@
 import 'dart:math';
 import '../data/card_data.dart';
 import '../models/card_model.dart';
+import 'card_location.dart';
 
 class DeckManager {
   final int playerCount;
@@ -11,6 +12,7 @@ class DeckManager {
   final List<GoStopCard> drawPile = [];
   final Random random = Random();
   final Map<int, List<GoStopCard>> capturedCards = {};
+  final Map<int, CardLocation> locator = {};
 
   DeckManager({required this.playerCount, this.isMatgo = false}) {
     if (playerCount < 2 || playerCount > 3) {
@@ -134,5 +136,26 @@ class DeckManager {
   GoStopCard? drawCard() {
     if (drawPile.isEmpty) return null;
     return drawPile.removeAt(0);
+  }
+
+  // 카드 이동 시 locator 업데이트 함수
+  void moveCard(int cardId, CardLocation to) {
+    locator[cardId] = to;
+    assert(_validState());
+  }
+
+  bool _validState() {
+    // 카드 개수(48+보너스) 및 중복 없음 검증
+    final allIds = <int>{};
+    for (var hand in playerHands.values) {
+      for (var c in hand) allIds.add(c.id);
+    }
+    for (var c in fieldCards) allIds.add(c.id);
+    for (var c in drawPile) allIds.add(c.id);
+    for (var p in capturedCards.values) {
+      for (var c in p) allIds.add(c.id);
+    }
+    // 카드 개수(51장) 및 중복 없음
+    return allIds.length == 51 && !locator.values.any((v) => v == null);
   }
 }
