@@ -115,13 +115,14 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: 72,
-          height: 108,
+          width: 48 + (visibleCount - 1) * 6.0,
+          height: 72 + (visibleCount - 1) * 3.0,
           child: Stack(
-            alignment: Alignment.center,
+            alignment: Alignment.centerLeft,
             children: [
               for (int i = 0; i < visibleCount - (isFlipping ? 1 : 0); i++)
                 Positioned(
+                  left: i * 6.0,
                   top: i * 3.0,
                   child: AnimatedBuilder(
                     animation: _drawController,
@@ -129,7 +130,6 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
                       final drawProgress = _drawController.value;
                       final isTopCard = i == visibleCount - 1;
                       final offset = isTopCard && isDrawing ? drawProgress * 20 : 0.0;
-                      
                       return Transform.translate(
                         offset: Offset(0, -offset),
                         child: Transform.rotate(
@@ -138,7 +138,7 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
                             decoration: BoxDecoration(
                               boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(2, 2))],
                             ),
-                            child: Image.asset(widget.cardBackImage, width: 72, height: 108, fit: BoxFit.contain),
+                            child: Image.asset(widget.cardBackImage, width: 48, height: 72, fit: BoxFit.contain),
                           ),
                         ),
                       );
@@ -151,22 +151,26 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
                   builder: (context, child) {
                     final angle = _flipController.value * pi;
                     final isBack = angle < pi / 2 && !showFront;
-                    return Transform.translate(
-                      offset: Offset(0, -20 * sin(_flipController.value * pi)),
-                      child: Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()
-                          ..setEntry(3, 2, 0.001)
-                          ..rotateY(angle),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(2, 2))],
-                          ),
-                          child: Image.asset(
-                            isBack ? widget.cardBackImage : widget.emptyDeckImage,
-                            width: 72,
-                            height: 108,
-                            fit: BoxFit.contain,
+                    return Positioned(
+                      left: (visibleCount - 1) * 6.0,
+                      top: (visibleCount - 1) * 3.0,
+                      child: Transform.translate(
+                        offset: Offset(0, -20 * sin(_flipController.value * pi)),
+                        child: Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()
+                            ..setEntry(3, 2, 0.001)
+                            ..rotateY(angle),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(2, 2))],
+                            ),
+                            child: Image.asset(
+                              isBack ? widget.cardBackImage : widget.emptyDeckImage,
+                              width: 48,
+                              height: 72,
+                              fit: BoxFit.contain,
+                            ),
                           ),
                         ),
                       ),

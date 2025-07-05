@@ -6,6 +6,8 @@ class CardWidget extends StatelessWidget {
   final bool showBack;
   final double width;
   final bool overlap;
+  final bool highlight;
+  final VoidCallback? onTap;
 
   const CardWidget({
     super.key,
@@ -13,6 +15,8 @@ class CardWidget extends StatelessWidget {
     this.showBack = false,
     this.width = 60,
     this.overlap = false,
+    this.highlight = false,
+    this.onTap,
   });
 
   @override
@@ -22,14 +26,21 @@ class CardWidget extends StatelessWidget {
       width: width,
     );
 
-    return overlap
-        ? Transform.translate(
-            offset: const Offset(0, 0), // 겹치기
-            child: image,
-          )
-        : Container(
-            margin: const EdgeInsets.only(left: 4),
-            child: image,
-          );
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedScale(
+        scale: highlight ? 1.15 : 1.0,
+        duration: const Duration(milliseconds: 180),
+        child: overlap
+            ? Transform.translate(
+                offset: const Offset(0, 0), // 겹치기
+                child: image,
+              )
+            : Container(
+                margin: const EdgeInsets.only(left: 4),
+                child: image,
+              ),
+      ),
+    );
   }
 }

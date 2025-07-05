@@ -1,7 +1,6 @@
 import 'dart:math';
 import '../data/card_data.dart';
 import '../models/card_model.dart';
-import 'card_location.dart';
 
 class DeckManager {
   final int playerCount;
@@ -12,7 +11,6 @@ class DeckManager {
   final List<GoStopCard> drawPile = [];
   final Random random = Random();
   final Map<int, List<GoStopCard>> capturedCards = {};
-  final Map<int, CardLocation> locator = {};
 
   DeckManager({required this.playerCount, this.isMatgo = false}) {
     if (playerCount < 2 || playerCount > 3) {
@@ -82,13 +80,7 @@ class DeckManager {
     }
     assert(allIds.length == goStopCards.where((card) => card.type != 'back').length, '카드 중복 또는 누락 발생!');
 
-    // 로그 추가
-    print('[DEAL] 분배 직후 fieldCards: \x1b[33m${fieldCards.length}\x1b[0m');
-    for (var c in fieldCards) {
-      print('[DEAL] 필드카드: id=${c.id}, month=${c.month}, type=${c.type}, name=${c.name}');
-    }
-    print('[DEBUG] playerHands[0] length: \x1b[32m${playerHands[0]?.length}\x1b[0m');
-    print('[DEBUG] playerHands[1] length: \x1b[32m${playerHands[1]?.length}\x1b[0m');
+
   }
 
   List<GoStopCard> getPlayerHand(int playerIndex) {
@@ -96,10 +88,6 @@ class DeckManager {
   }
 
   List<GoStopCard> getFieldCards() {
-    print('[getFieldCards] fieldCards: ${fieldCards.length}');
-    for (var c in fieldCards) {
-      print('[getFieldCards] 필드카드: id=${c.id}, month=${c.month}, type=${c.type}, name=${c.name}');
-    }
     return fieldCards;
   }
 
@@ -136,26 +124,5 @@ class DeckManager {
   GoStopCard? drawCard() {
     if (drawPile.isEmpty) return null;
     return drawPile.removeAt(0);
-  }
-
-  // 카드 이동 시 locator 업데이트 함수
-  void moveCard(int cardId, CardLocation to) {
-    locator[cardId] = to;
-    assert(_validState());
-  }
-
-  bool _validState() {
-    // 카드 개수(48+보너스) 및 중복 없음 검증
-    final allIds = <int>{};
-    for (var hand in playerHands.values) {
-      for (var c in hand) allIds.add(c.id);
-    }
-    for (var c in fieldCards) allIds.add(c.id);
-    for (var c in drawPile) allIds.add(c.id);
-    for (var p in capturedCards.values) {
-      for (var c in p) allIds.add(c.id);
-    }
-    // 카드 개수(51장) 및 중복 없음
-    return allIds.length == 51 && !locator.values.any((v) => v == null);
   }
 }

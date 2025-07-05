@@ -99,10 +99,10 @@ Widget capturedOverlapRow(Map<String, List<String>> captured) {
           children: [
             Text(type, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             SizedBox(
-              width: (captured[type]?.length ?? 0) * 20.0 + 48,
+              width: ((type == '끗' ? captured['동물'] : captured[type])?.length ?? 0) * 20.0 + 48,
               height: 72,
               child: overlappedCardStack(
-                captured[type] ?? [],
+                type == '끗' ? (captured['동물'] ?? []) : (captured[type] ?? []),
                 showBadge: type == '피',
               ),
             ),
@@ -149,48 +149,42 @@ class _AnimatedDrawnCardState extends State<_AnimatedDrawnCard> with TickerProvi
   @override
   void initState() {
     super.initState();
-    moveCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    moveCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
     flipCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
-    scaleCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    scaleCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
     moveAnim = Tween<Offset>(begin: widget.start, end: widget.end)
         .animate(CurvedAnimation(parent: moveCtrl, curve: Curves.easeInOut));
     flipAnim = Tween<double>(begin: 0, end: 1)
         .animate(CurvedAnimation(parent: flipCtrl, curve: Curves.easeInOut));
-    scaleAnim = Tween<double>(begin: 0.8, end: 1.0)
-        .animate(CurvedAnimation(parent: scaleCtrl, curve: Curves.easeOut));
+    // 중앙에서 확대 후 다시 축소: 0~0.4까지 1.0, 0.4~0.7까지 2.0, 0.7~1.0까지 1.0
+    scaleAnim = TweenSequence([
+      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 1.0), weight: 40),
+      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 2.0), weight: 30),
+      TweenSequenceItem(tween: Tween<double>(begin: 2.0, end: 1.0), weight: 30),
+    ]).animate(CurvedAnimation(parent: scaleCtrl, curve: Curves.easeInOut));
 
-    // 애니메이션 시퀀스: 이동 → 뒤집기 → 스케일
-    moveCtrl.forward().then((_) {
-      if (widget.flip) {
-        flipCtrl.forward().then((_) {
-          scaleCtrl.forward().then((_) => _onAnimationEnd());
-        });
-      } else {
-        scaleCtrl.forward().then((_) => _onAnimationEnd());
-      }
+    // 애니메이션 시퀀스: 이동+확대 → 뒤집기 → 스케일
+    moveCtrl.forward();
+    scaleCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted && widget.flip) flipCtrl.forward();
     });
-    
     moveCtrl.addListener(() => setState(() {}));
     flipCtrl.addListener(() => setState(() {}));
     scaleCtrl.addListener(() => setState(() {}));
-  }
-
-  void _onAnimationEnd() {
-    if (!mounted) return;
-    if (widget.toCaptured && widget.capturedOffset != null) {
-      Future.delayed(const Duration(milliseconds: 200), () {
-        if (!mounted) return;
+    moveCtrl.addStatusListener((status) {
+      if (status == AnimationStatus.completed && widget.toCaptured && widget.capturedOffset != null) {
         setState(() { movedToCaptured = true; });
         Future.delayed(const Duration(milliseconds: 400), () {
           widget.onEnd?.call();
         });
-      });
-    } else {
-      Future.delayed(const Duration(milliseconds: 400), () {
-        widget.onEnd?.call();
-      });
-    }
+      } else if (status == AnimationStatus.completed) {
+        Future.delayed(const Duration(milliseconds: 400), () {
+          widget.onEnd?.call();
+        });
+      }
+    });
   }
 
   @override
@@ -219,10 +213,11 @@ class _AnimatedDrawnCardState extends State<_AnimatedDrawnCard> with TickerProvi
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.3),
-                blurRadius: 8,
-                offset: const Offset(2, 4),
+                blurRadius: 16,
+                offset: const Offset(2, 8),
               ),
             ],
+            border: Border.all(color: Colors.amber, width: scale > 1.5 ? 4 : 0),
           ),
           child: Transform(
             alignment: Alignment.center,
@@ -230,15 +225,14 @@ class _AnimatedDrawnCardState extends State<_AnimatedDrawnCard> with TickerProvi
               ..setEntry(3, 2, 0.001)
               ..rotateY(angle),
             child: SizedBox(
-              width: 72,
-              height: 96,
+              width: 48,
+              height: 72,
               child: Transform(
                 alignment: Alignment.center,
                 transform: Matrix4.identity()..rotateY(isBack ? 0 : pi),
                 child: Image.asset(
                   isBack ? widget.backImage : widget.frontImage,
                   fit: BoxFit.contain,
-                  key: ValueKey(isBack),
                 ),
               ),
             ),
@@ -273,6 +267,9 @@ class GoStopBoard extends StatefulWidget {
   final List<int> highlightHandIndexes;
   final CardDeckController? cardStackController;
   final int? drawPileCount;
+  final Map<String, GlobalKey>? fieldCardKeys;
+  final GlobalKey? fieldStackKey;
+  final GoStopCard? bonusCard; // 카드더미에서 깐 보너스피
 
   const GoStopBoard({
     super.key,
@@ -299,6 +296,9 @@ class GoStopBoard extends StatefulWidget {
     required this.highlightHandIndexes,
     this.cardStackController,
     this.drawPileCount,
+    this.fieldCardKeys,
+    this.fieldStackKey,
+    this.bonusCard,
   });
 
   @override
@@ -320,8 +320,15 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   bool animToCaptured = false;
   Offset? animCapturedOffset;
   
+  // 손패 카드 애니메이션 상태
+  Map<int, AnimationController> handCardAnimations = {};
+  Map<int, Offset> handCardTargetPositions = {};
+  Map<int, bool> handCardAnimating = {};
+  
   // 카드더미 위치를 저장할 GlobalKey
   final GlobalKey deckKey = GlobalKey();
+  // 12개 그룹용 빈자리 GlobalKey
+  final List<Key> emptyGroupKeys = List.generate(12, (_) => GlobalKey());
 
   void playEatAnimation(int handIndex, int fieldIndex) {
     // 애니메이션 로직은 나중에 구현
@@ -390,6 +397,27 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     widget.onCardTap?.call(idx);
   }
 
+  // 손패 카드 애니메이션 함수
+  void animateHandCard(int cardIndex, Offset targetPosition, VoidCallback onComplete) {
+    if (handCardAnimating[cardIndex] == true) return; // 이미 애니메이션 중이면 무시
+    
+    setState(() {
+      handCardAnimating[cardIndex] = true;
+      handCardTargetPositions[cardIndex] = targetPosition;
+    });
+    
+    // 애니메이션 완료 후 콜백 실행
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        setState(() {
+          handCardAnimating[cardIndex] = false;
+          handCardTargetPositions.remove(cardIndex);
+        });
+        onComplete();
+      }
+    });
+  }
+
   @override
   void didUpdateWidget(covariant GoStopBoard oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -405,7 +433,13 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(widget.opponentHandCount, (i) =>
-        CardWidget(imageUrl: widget.deckBackImage, isFaceDown: true)),
+        CardWidget(
+          imageUrl: widget.deckBackImage,
+          isFaceDown: true,
+          width: 48 * 0.2, // 기존 크기의 20%
+          height: 72 * 0.2, // 기존 크기의 20%
+        )
+      ),
     );
   }
 
@@ -422,53 +456,126 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
       }
     }
 
-    // 2. 표시할 위젯 리스트 생성 (단일 카드 또는 스택)
-    final List<Widget> itemsToPlace = [];
-    monthlyCards.forEach((month, cards) {
-      if (cards.length == 1) {
-        itemsToPlace.add(CardWidget(imageUrl: cards.first.imageUrl));
-      } else {
-        itemsToPlace.add(
-          SizedBox(
-            width: 48,
-            height: 72 + (cards.length - 1) * 20.0,
+    // 필드 카드별 GlobalKey를 관리하는 맵의 타입을 Map<String, Key>로 변경
+    final Map<String, Key> fieldCardKeys = widget.fieldCardKeys ?? {};
+
+    // 2. 12개 월 그룹을 항상 같은 위치에 고정 배치
+    final List<Widget> itemsToPlace = List.generate(12, (i) {
+      final month = i + 1;
+      final cards = monthlyCards[month] ?? [];
+      
+      // 보너스피가 이 월에 해당하는지 확인
+      final hasBonusCard = widget.bonusCard != null && widget.bonusCard!.month == month;
+      
+      if (cards.isEmpty) {
+        // 빈자리만
+        return Container();
+      } else if (cards.length == 1) {
+        // 첫 카드의 key는 emptyGroupKeys[월-1]를 사용
+        final key = emptyGroupKeys[i];
+        fieldCardKeys[cards.first.id.toString()] = key;
+        
+        if (hasBonusCard) {
+          // 보너스피가 있으면 겹쳐서 표시
+          return SizedBox(
+            width: 48 + 18.0,
+            height: 72 + 8.0,
             child: Stack(
-              children: List.generate(cards.length, (i) {
-                return Positioned(
+              children: [
+                Positioned(
                   left: 0,
-                  top: i * 20.0,
-                  child: CardWidget(imageUrl: cards[i].imageUrl),
+                  top: 0,
+                  child: CardWidget(key: key, imageUrl: cards.first.imageUrl),
+                ),
+                Positioned(
+                  left: 18.0,
+                  top: 8.0,
+                  child: CardWidget(
+                    key: UniqueKey(), 
+                    imageUrl: widget.bonusCard!.imageUrl,
+                    highlight: true, // 보너스피는 강조 표시
+                  ),
+                ),
+              ],
+            ),
+          );
+        } else {
+          return CardWidget(key: key, imageUrl: cards.first.imageUrl);
+        }
+      } else {
+        // 여러 장이면 첫 카드는 emptyGroupKeys[월-1], 나머지는 UniqueKey 사용
+        final totalCards = hasBonusCard ? cards.length + 1 : cards.length;
+        return SizedBox(
+          width: 48 + (totalCards - 1) * 18.0,
+          height: 72 + (totalCards - 1) * 8.0,
+          child: Stack(
+            children: [
+              ...List.generate(cards.length, (j) {
+                final key = j == 0 ? emptyGroupKeys[i] : UniqueKey();
+                if (j == 0) fieldCardKeys[cards[j].id.toString()] = key;
+                return Positioned(
+                  left: j * 18.0,
+                  top: j * 8.0,
+                  child: CardWidget(key: key, imageUrl: cards[j].imageUrl),
                 );
               }),
-            ),
+              if (hasBonusCard)
+                Positioned(
+                  left: cards.length * 18.0,
+                  top: cards.length * 8.0,
+                  child: CardWidget(
+                    key: UniqueKey(), 
+                    imageUrl: widget.bonusCard!.imageUrl,
+                    highlight: true, // 보너스피는 강조 표시
+                  ),
+                ),
+            ],
           ),
         );
       }
     });
-    itemsToPlace.addAll(otherCards.map((card) => CardWidget(imageUrl: card.imageUrl)));
+    itemsToPlace.addAll(otherCards.map((card) {
+      // 기타 카드는 UniqueKey 사용
+      return CardWidget(key: UniqueKey(), imageUrl: card.imageUrl);
+    }));
 
-    // 3. 기존 레이아웃에 위젯 배치
+    // 3. 카드 그룹 12개를 십자형으로 넉넉하게 배치 (항상 같은 위치)
     final List<Widget> fieldCardWidgets = [];
-    final items = itemsToPlace.take(12).toList();
-
-    if (items.isNotEmpty) fieldCardWidgets.add(Positioned(top: 20, left: 60, child: items[0]));
-    if (items.length > 1) fieldCardWidgets.add(Positioned(top: 20, left: 120, child: items[1]));
-    if (items.length > 2) fieldCardWidgets.add(Positioned(top: 20, right: 120, child: items[2]));
-    if (items.length > 3) fieldCardWidgets.add(Positioned(top: 20, right: 60, child: items[3]));
-    if (items.length > 4) fieldCardWidgets.add(Positioned(left: 0, top: 100, child: items[4]));
-    if (items.length > 5) fieldCardWidgets.add(Positioned(left: 0, bottom: 80, child: items[5]));
-    if (items.length > 6) fieldCardWidgets.add(Positioned(right: 0, top: 100, child: items[6]));
-    if (items.length > 7) fieldCardWidgets.add(Positioned(right: 0, bottom: 80, child: items[7]));
-    if (items.length > 8) fieldCardWidgets.add(Positioned(bottom: 0, left: 60, child: items[8]));
-    if (items.length > 9) fieldCardWidgets.add(Positioned(bottom: 0, left: 120, child: items[9]));
-    if (items.length > 10) fieldCardWidgets.add(Positioned(bottom: 0, right: 120, child: items[10]));
-    if (items.length > 11) fieldCardWidgets.add(Positioned(bottom: 0, right: 60, child: items[11]));
-
+    // 윗 행 4개
+    if (itemsToPlace.length > 0) fieldCardWidgets.add(Positioned(top: 0, left: 80, child: itemsToPlace[0]));
+    if (itemsToPlace.length > 1) fieldCardWidgets.add(Positioned(top: 0, left: 170, child: itemsToPlace[1]));
+    if (itemsToPlace.length > 2) fieldCardWidgets.add(Positioned(top: 0, left: 260, child: itemsToPlace[2]));
+    if (itemsToPlace.length > 3) fieldCardWidgets.add(Positioned(top: 0, left: 350, child: itemsToPlace[3]));
+    // 왼쪽 2개
+    if (itemsToPlace.length > 4) fieldCardWidgets.add(Positioned(left: 0, top: 90, child: itemsToPlace[4]));
+    if (itemsToPlace.length > 5) fieldCardWidgets.add(Positioned(left: 0, top: 180, child: itemsToPlace[5]));
+    // 오른쪽 2개
+    if (itemsToPlace.length > 6) fieldCardWidgets.add(Positioned(right: 0, top: 90, child: itemsToPlace[6]));
+    if (itemsToPlace.length > 7) fieldCardWidgets.add(Positioned(right: 0, top: 180, child: itemsToPlace[7]));
+    // 아래 행 4개
+    if (itemsToPlace.length > 8) fieldCardWidgets.add(Positioned(bottom: 0, left: 80, child: itemsToPlace[8]));
+    if (itemsToPlace.length > 9) fieldCardWidgets.add(Positioned(bottom: 0, left: 170, child: itemsToPlace[9]));
+    if (itemsToPlace.length > 10) fieldCardWidgets.add(Positioned(bottom: 0, left: 260, child: itemsToPlace[10]));
+    if (itemsToPlace.length > 11) fieldCardWidgets.add(Positioned(bottom: 0, left: 350, child: itemsToPlace[11]));
+    // 각 그룹에 투명한 key placeholder 추가
+    for (int i = 0; i < 12; i++) {
+      fieldCardWidgets.add(
+        Positioned(
+          // 그룹별 위치와 동일하게
+          top: i < 4 ? 0 : (i < 6 ? 90 + (i - 4) * 90 : (i < 8 ? 90 + (i - 6) * 90 : null)),
+          left: i < 4 ? 80 + i * 90 : (i < 6 ? 0 : (i >= 8 ? 80 + (i - 8) * 90 : null)),
+          right: i >= 6 && i < 8 ? 0 : null,
+          bottom: i >= 8 ? 0 : null,
+          child: Container(key: emptyGroupKeys[i], width: 48, height: 72, color: Colors.transparent),
+        ),
+      );
+    }
     return Center(
       child: SizedBox(
-        width: 420,
-        height: 320,
+        width: 520,
+        height: 360,
         child: Stack(
+          key: widget.fieldStackKey,
           alignment: Alignment.center,
           children: [
             ...fieldCardWidgets,
@@ -543,6 +650,9 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     });
     if (onEnd != null) onEnd();
   }
+
+  // 빈자리 그룹 key getter
+  List<Key> getEmptyGroupKeys() => emptyGroupKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -634,34 +744,45 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 내 손패 렌더링 부분: 애니메이션 없이 기존대로 복원
+                          // 내 손패 렌더링 부분: 애니메이션 가능하도록 수정
                           Expanded(
                             child: SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               child: Row(
                                 children: [
                                   for (int i = 0; i < widget.playerHand.length; i++)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 12.0),
-                                      child: Stack(
-                                        clipBehavior: Clip.none,
-                                        alignment: Alignment.topCenter,
-                                        children: [
-                                          // 먹을 수 있는 카드면 카드 위에 화살표 표시
-                                          if (widget.highlightHandIndexes.contains(i))
-                                            Positioned(
-                                              top: -24,
-                                              child: Icon(Icons.arrow_drop_down, color: Colors.orange, size: 40),
+                                    AnimatedContainer(
+                                      duration: const Duration(milliseconds: 600),
+                                      curve: Curves.easeInOutCubic,
+                                      transform: handCardAnimating[i] == true 
+                                        ? Matrix4.translationValues(
+                                            handCardTargetPositions[i]?.dx ?? 0,
+                                            handCardTargetPositions[i]?.dy ?? 0,
+                                            0,
+                                          )
+                                        : Matrix4.identity(),
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(top: 12.0),
+                                        child: Stack(
+                                          clipBehavior: Clip.none,
+                                          alignment: Alignment.topCenter,
+                                          children: [
+                                            // 먹을 수 있는 카드면 카드 위에 화살표 표시
+                                            if (widget.highlightHandIndexes.contains(i))
+                                              Positioned(
+                                                top: -24,
+                                                child: Icon(Icons.arrow_drop_down, color: Colors.orange, size: 40),
+                                              ),
+                                            GestureDetector(
+                                              onTap: () => _onHandCardTap(i),
+                                              child: CardWidget(
+                                                imageUrl: widget.playerHand[i].imageUrl,
+                                                width: 96,
+                                                height: 144,
+                                              ),
                                             ),
-                                          GestureDetector(
-                                            onTap: () => _onHandCardTap(i),
-                                            child: CardWidget(
-                                              imageUrl: widget.playerHand[i].imageUrl,
-                                              width: 96,
-                                              height: 144,
-                                            ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
                                 ],
