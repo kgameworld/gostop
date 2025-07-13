@@ -17,20 +17,13 @@ class EventEvaluator {
     return matches.length == 2;
   }
 
-  /// 폭탄: 손패 동일 월 3장 + 바닥에 해당 월 1장 있을 때
-  static bool isBomb(List<GoStopCard> hand, List<GoStopCard> field) {
-    final Map<int, int> handMonthCount = {};
-    for (var c in hand) {
-      handMonthCount[c.month] = (handMonthCount[c.month] ?? 0) + 1;
-    }
-    for (var entry in handMonthCount.entries) {
-      if (entry.value >= 3) {
-        if (field.any((f) => f.month == entry.key)) {
-          return true;
-        }
-      }
-    }
-    return false;
+  /// 폭탄: 낸 카드 기준 손패 동일 월 3장 + 바닥에 해당 월 1장 있을 때
+  static bool isBomb(List<GoStopCard> hand, GoStopCard playedCard, List<GoStopCard> field) {
+    // 손패에 낸 카드 월이 3장 이상인지 확인
+    final sameMonthInHand = hand.where((c) => c.month == playedCard.month).length;
+    // 필드에 낸 카드 월이 1장 이상 있는지 확인
+    final sameMonthInField = field.where((c) => c.month == playedCard.month).length;
+    return sameMonthInHand >= 3 && sameMonthInField >= 1;
   }
 
   /// 뻑: 낸 카드 포함 동일 월 3장 등장 시

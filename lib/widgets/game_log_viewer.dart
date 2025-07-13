@@ -6,10 +6,10 @@ class GameLogViewer extends StatefulWidget {
   final bool isVisible;
 
   const GameLogViewer({
-    Key? key,
+    super.key,
     required this.logger,
     this.isVisible = false,
-  }) : super(key: key);
+  });
 
   @override
   State<GameLogViewer> createState() => _GameLogViewerState();
@@ -102,9 +102,11 @@ class _GameLogViewerState extends State<GameLogViewer> {
             children: [
               const Text('레벨:', style: TextStyle(color: Colors.white, fontSize: 12)),
               const SizedBox(width: 8),
-              ...LogLevel.values.map((level) => Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: FilterChip(
+              Expanded(
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: LogLevel.values.map((level) => FilterChip(
                   label: Text(_getLevelText(level), style: TextStyle(fontSize: 10)),
                   selected: _selectedLevel == level,
                   onSelected: (selected) {
@@ -117,8 +119,9 @@ class _GameLogViewerState extends State<GameLogViewer> {
                   labelStyle: TextStyle(
                     color: _selectedLevel == level ? Colors.white : Colors.grey[300],
                   ),
+                  )).toList(),
                 ),
-              )).toList(),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -127,10 +130,12 @@ class _GameLogViewerState extends State<GameLogViewer> {
             children: [
               const Text('플레이어:', style: TextStyle(color: Colors.white, fontSize: 12)),
               const SizedBox(width: 8),
-              DropdownButton<int?>(
+              Flexible(
+                child: DropdownButton<int?>(
                 value: _selectedPlayer,
                 dropdownColor: Colors.grey[800],
                 style: const TextStyle(color: Colors.white, fontSize: 12),
+                  isExpanded: true,
                 items: [
                   const DropdownMenuItem(value: null, child: Text('전체')),
                   const DropdownMenuItem(value: 1, child: Text('P1')),
@@ -141,17 +146,20 @@ class _GameLogViewerState extends State<GameLogViewer> {
                     _selectedPlayer = value;
                   });
                 },
+                ),
               ),
               const SizedBox(width: 16),
               const Text('턴:', style: TextStyle(color: Colors.white, fontSize: 12)),
               const SizedBox(width: 8),
-              DropdownButton<int?>(
+              Flexible(
+                child: DropdownButton<int?>(
                 value: _selectedTurn,
                 dropdownColor: Colors.grey[800],
                 style: const TextStyle(color: Colors.white, fontSize: 12),
+                  isExpanded: true,
                 items: [
                   const DropdownMenuItem(value: null, child: Text('전체')),
-                  ...List.generate(widget.logger.getLogs().length > 0 ? 
+                  ...List.generate(widget.logger.getLogs().isNotEmpty ? 
                     widget.logger.getLogs().map((log) => log.turnNumber).reduce((a, b) => a > b ? a : b) : 0, 
                     (index) => DropdownMenuItem(
                       value: index + 1,
@@ -164,6 +172,7 @@ class _GameLogViewerState extends State<GameLogViewer> {
                     _selectedTurn = value;
                   });
                 },
+                ),
               ),
             ],
           ),
@@ -189,6 +198,15 @@ class _GameLogViewerState extends State<GameLogViewer> {
     if (_selectedTurn != null) {
       filteredLogs = filteredLogs.where((log) => log.turnNumber == _selectedTurn).toList();
     }
+
+    // 중복 제거 (같은 메시지가 연속으로 기록될 경우)
+    final Set<String> seen = {};
+    filteredLogs = filteredLogs.where((log) {
+      final key = '${log.turnNumber}-${log.playerNumber}-${log.message}-${log.level.name}';
+      if (seen.contains(key)) return false;
+      seen.add(key);
+      return true;
+    }).toList();
 
     return ListView.builder(
       controller: _scrollController,
@@ -234,19 +252,25 @@ class _GameLogViewerState extends State<GameLogViewer> {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
+              Flexible(
+                child: Text(
                 'T${log.turnNumber} P${log.playerNumber}',
                 style: const TextStyle(
                   color: Colors.grey,
                   fontSize: 10,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
+              Flexible(
+                child: Text(
                 log.phase,
                 style: const TextStyle(
                   color: Colors.blue,
                   fontSize: 10,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const Spacer(),
@@ -282,6 +306,8 @@ class _GameLogViewerState extends State<GameLogViewer> {
                   fontSize: 10,
                   fontFamily: 'monospace',
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
             ),
           ],
@@ -305,32 +331,52 @@ class _GameLogViewerState extends State<GameLogViewer> {
           bottomRight: Radius.circular(8),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          Row(
+            children: [
+              Flexible(
+                child: Text(
             '총 $totalLogs개',
             style: const TextStyle(color: Colors.white, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
           ),
           const SizedBox(width: 16),
           if (errorLogs > 0)
-            Text(
+                Flexible(
+                  child: Text(
               '에러 $errorLogs개',
               style: const TextStyle(color: Colors.red, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
             ),
           if (warningLogs > 0) ...[
             const SizedBox(width: 8),
-            Text(
+                Flexible(
+                  child: Text(
               '경고 $warningLogs개',
               style: const TextStyle(color: Colors.orange, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
             ),
           ],
           if (validationFailures > 0) ...[
             const SizedBox(width: 8),
-            Text(
+                Flexible(
+                  child: Text(
               '검증실패 $validationFailures개',
               style: const TextStyle(color: Colors.pink, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
             ),
           ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
           const Spacer(),
           Row(
             children: [
@@ -341,12 +387,14 @@ class _GameLogViewerState extends State<GameLogViewer> {
                     _autoScroll = value ?? true;
                   });
                 },
-                fillColor: MaterialStateProperty.all(Colors.grey[600]),
+                fillColor: WidgetStateProperty.all(Colors.grey[600]),
                 checkColor: Colors.white,
               ),
               const Text(
                 '자동 스크롤',
                 style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ],
               ),
             ],
           ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'l10n/app_localizations.dart';
 
 class CustomAnimatedScale extends StatelessWidget {
   final Widget child;
@@ -117,7 +118,7 @@ class _CardFlipAnimationState extends State<CardFlipAnimation>
   late Animation<double> _flipAnimation;
   late Animation<double> _scaleAnimation;
   late Animation<Offset> _bounceAnimation;
-  bool _isFlipped = false;
+  final bool _isFlipped = false;
 
   @override
   void initState() {
@@ -168,7 +169,7 @@ class _CardFlipAnimationState extends State<CardFlipAnimation>
       animation: _controller,
       builder: (context, child) {
         final angle = _flipAnimation.value * pi;
-        final isBack = angle < pi / 2;
+        final isBack = angle < pi / 2;  // 수정: π/2 미만일 때 뒷면, 이상일 때 앞면 (카드더미에서 뒤집어서 나오는 경우)
         
         return Transform.translate(
           offset: _bounceAnimation.value,
@@ -194,9 +195,12 @@ class _CardFlipAnimationState extends State<CardFlipAnimation>
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    isBack ? widget.backImage : widget.frontImage,
-                    fit: BoxFit.contain,
+                  child: Transform.scale(
+                    scaleX: isBack ? 1.0 : -1.0,  // 앞면일 때 좌우 반전
+                    child: Image.asset(
+                      isBack ? widget.backImage : widget.frontImage,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),
@@ -237,6 +241,7 @@ class _CardFlipMoveAnimationState extends State<CardFlipMoveAnimation>
   late Animation<Offset> _moveAnimation;
   late Animation<double> _flipAnimation;
   late Animation<double> _scaleAnimation;
+  late Animation<Offset> _bounceAnimation;
 
   @override
   void initState() {
@@ -262,12 +267,23 @@ class _CardFlipMoveAnimationState extends State<CardFlipMoveAnimation>
       curve: Curves.easeInOut,
     ));
 
-    _scaleAnimation = Tween<double>(
-      begin: 0.8,
-      end: 1.0,
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.1).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 40,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 1.1, end: 1.0).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 60,
+      ),
+    ]).animate(_controller);
+
+    _bounceAnimation = Tween<Offset>(
+      begin: const Offset(0, 0),
+      end: const Offset(0, -10),
     ).animate(CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeOut,
+      curve: const Interval(0.6, 1.0, curve: Curves.elasticOut),
     ));
 
     _controller.forward().then((_) {
@@ -287,11 +303,10 @@ class _CardFlipMoveAnimationState extends State<CardFlipMoveAnimation>
       animation: _controller,
       builder: (context, child) {
         final angle = _flipAnimation.value * pi;
-        final isBack = angle < pi / 2;
+        final isBack = angle < pi / 2;  // 수정: π/2 미만일 때 뒷면, 이상일 때 앞면 (카드더미에서 뒤집어서 나오는 경우)
         
-        return Positioned(
-          left: _moveAnimation.value.dx,
-          top: _moveAnimation.value.dy,
+        return Transform.translate(
+          offset: Offset(_moveAnimation.value.dx + _bounceAnimation.value.dx, _moveAnimation.value.dy + _bounceAnimation.value.dy),
           child: Transform.scale(
             scale: _scaleAnimation.value,
             child: Transform(
@@ -357,6 +372,7 @@ class _CardMoveAnimationState extends State<CardMoveAnimation>
   late Animation<Offset> _moveAnimation;
   late Animation<double> _rotationAnimation;
   late Animation<double> _scaleAnimation;
+  late Animation<Offset> _bounceAnimation;
   final List<Offset> _trailPositions = [];
 
   @override
@@ -383,12 +399,23 @@ class _CardMoveAnimationState extends State<CardMoveAnimation>
       curve: Curves.easeInOut,
     ));
 
-    _scaleAnimation = Tween<double>(
-      begin: 0.8,
-      end: 1.0,
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.1).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 40,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 1.1, end: 1.0).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 60,
+      ),
+    ]).animate(_controller);
+
+    _bounceAnimation = Tween<Offset>(
+      begin: const Offset(0, 0),
+      end: const Offset(0, -10),
     ).animate(CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeOut,
+      curve: const Interval(0.6, 1.0, curve: Curves.elasticOut),
     ));
 
     _controller.forward().then((_) {
@@ -419,9 +446,8 @@ class _CardMoveAnimationState extends State<CardMoveAnimation>
       children: [
         // 트레일 효과
         if (widget.withTrail)
-          ..._trailPositions.map((position) => Positioned(
-            left: position.dx,
-            top: position.dy,
+          ..._trailPositions.map((position) => Transform.translate(
+            offset: Offset(position.dx, position.dy),
             child: Opacity(
               opacity: 0.3,
               child: Transform.scale(
@@ -437,9 +463,8 @@ class _CardMoveAnimationState extends State<CardMoveAnimation>
           )),
         
         // 메인 카드
-        Positioned(
-          left: _moveAnimation.value.dx,
-          top: _moveAnimation.value.dy,
+        Transform.translate(
+          offset: Offset(_moveAnimation.value.dx + _bounceAnimation.value.dx, _moveAnimation.value.dy + _bounceAnimation.value.dy),
           child: Transform.rotate(
             angle: _rotationAnimation.value,
             child: Transform.scale(
@@ -543,71 +568,257 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
   Widget _buildEffectWidget() {
     switch (widget.effectType) {
       case 'ppeok':
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.red.withOpacity(0.9),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 3),
-          ),
-          child: const Text(
-            '뻑!',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-            ),
+        // 뻑!: 네모 박스 없이 텍스트만 강조 효과로 표시
+        return Text(
+          AppLocalizations.of(context)!.ppeok + '!',
+          style: const TextStyle(
+            color: Colors.red, // 강조 색상
+            fontSize: 36, // 크기 키움
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 8,
+                color: Colors.black38,
+                offset: Offset(2, 2),
+              ),
+            ],
           ),
         );
-      case 'ttak':
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.9),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 3),
-          ),
-          child: const Text(
-            '따닥!',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-            ),
+      case 'sseul':
+        // 쓸: 파란색, 아래에서 위로 슬라이드, 그림자 강조
+        return Text(
+          AppLocalizations.of(context)!.sweep + '!',
+          style: const TextStyle(
+            color: Colors.blueAccent,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.black26,
+                offset: Offset(0, 4),
+              ),
+            ],
           ),
         );
       case 'bomb':
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.purple.withOpacity(0.9),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 3),
+        // 폭탄: 보라/노랑, scale+shake 느낌, 그림자 강조
+        return Text(
+          AppLocalizations.of(context)!.bombStatus,
+          style: const TextStyle(
+            color: Colors.deepPurple,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 12,
+                color: Colors.amber,
+                offset: Offset(0, 0),
+              ),
+              Shadow(
+                blurRadius: 8,
+                color: Colors.black38,
+                offset: Offset(2, 2),
+              ),
+            ],
           ),
-          child: const Text(
-            '폭탄!',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-            ),
+        );
+      case 'ttak':
+        // 따닥: 오렌지/노랑, 좌우로 튕기는 느낌, 그림자 강조
+        return Text(
+          AppLocalizations.of(context)!.doubleMatch + '!',
+          style: const TextStyle(
+            color: Colors.orange,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 8,
+                color: Colors.yellow,
+                offset: Offset(0, 0),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
           ),
         );
       case 'chok':
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.9),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 3),
+        // 쪽: 네모 박스 없이 텍스트만 강조
+        return Text(
+          AppLocalizations.of(context)!.snap + '!',
+          style: const TextStyle(
+            color: Colors.blue,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.white70,
+                offset: Offset(0, 4),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
           ),
-          child: const Text(
-            '쪽!',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-            ),
+        );
+      case 'godori':
+        // 고도리: 네모 박스 없이 텍스트만 강조
+        return Text(
+          AppLocalizations.of(context)!.godori + '!',
+          style: const TextStyle(
+            color: Colors.green,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.amber,
+                offset: Offset(0, -2),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
+          ),
+        );
+      case 'piSteal':
+        // 피 강탈: 네모 박스 없이 텍스트만 강조
+        return Text(
+          '피 강탈!',
+          style: const TextStyle(
+            color: Colors.pink,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.white70,
+                offset: Offset(0, 4),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
+          ),
+        );
+      case 'hongdan':
+        // 홍단: 빨강+금색, 위에서 아래로 drop 느낌
+        return Text(
+          '홍단!',
+          style: const TextStyle(
+            color: Colors.red,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.amber,
+                offset: Offset(0, 4),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
+          ),
+        );
+      case 'cheongdan':
+        // 청단: 파랑+은색, 좌우 흔들림 느낌
+        return Text(
+          '청단!',
+          style: const TextStyle(
+            color: Colors.blue,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.white70,
+                offset: Offset(-2, 2),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
+          ),
+        );
+      case 'chodan':
+        // 초단: 초록+금색, 아래에서 위로 튀는 느낌
+        return Text(
+          '초단!',
+          style: const TextStyle(
+            color: Colors.green,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 10,
+                color: Colors.amber,
+                offset: Offset(0, -2),
+              ),
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
+          ),
+        );
+      case 'ppeok_complete':
+        // 뻑 완성: 빨강+노랑, scale+flash 느낌
+        return Text(
+          '뻑 완성!',
+          style: const TextStyle(
+            color: Colors.red,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 14,
+                color: Colors.yellow,
+                offset: Offset(0, 0),
+              ),
+              Shadow(
+                blurRadius: 8,
+                color: Colors.black38,
+                offset: Offset(2, 2),
+              ),
+            ],
+          ),
+        );
+      case 'heundal':
+        // 흔들: 주황+금색, 좌우 크게 흔들리는 느낌
+        return Text(
+          AppLocalizations.of(context)!.shake + '!',
+          style: const TextStyle(
+            color: Colors.orange,
+            fontSize: 36,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 12,
+                color: Colors.amber,
+                offset: Offset(0, 0),
+              ),
+              Shadow(
+                blurRadius: 8,
+                color: Colors.black26,
+                offset: Offset(2, 2),
+              ),
+            ],
           ),
         );
       default:
@@ -662,6 +873,7 @@ class _CardCaptureAnimationState extends State<CardCaptureAnimation>
   late Animation<Offset> _moveAnimation;
   late Animation<double> _scaleAnimation;
   late Animation<double> _glowAnimation;
+  late Animation<Offset> _bounceAnimation;
 
   @override
   void initState() {
@@ -679,13 +891,16 @@ class _CardCaptureAnimationState extends State<CardCaptureAnimation>
       curve: Curves.easeInOutBack,
     ));
 
-    _scaleAnimation = Tween<double>(
-      begin: 1.0,
-      end: 1.2,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.5, 0.8, curve: Curves.easeOut),
-    ));
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.1).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 40,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 1.1, end: 1.0).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 60,
+      ),
+    ]).animate(_controller);
 
     _glowAnimation = Tween<double>(
       begin: 0.0,
@@ -693,6 +908,14 @@ class _CardCaptureAnimationState extends State<CardCaptureAnimation>
     ).animate(CurvedAnimation(
       parent: _controller,
       curve: const Interval(0.7, 1.0, curve: Curves.easeIn),
+    ));
+
+    _bounceAnimation = Tween<Offset>(
+      begin: const Offset(0, 0),
+      end: const Offset(0, -10),
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.6, 1.0, curve: Curves.elasticOut),
     ));
 
     _controller.forward().then((_) {
@@ -708,13 +931,13 @@ class _CardCaptureAnimationState extends State<CardCaptureAnimation>
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox.expand(
+    final stackChild = SizedBox.expand(
       child: Stack(
         children: widget.cardImages.asMap().entries.map((entry) {
           final index = entry.key;
           final image = entry.value;
-          return Positioned(
-            left: index * 20.0,
+          return Transform.translate(
+            offset: Offset(index * 20.0, 0),
             child: Image.asset(
               image,
               width: 72,
@@ -724,6 +947,20 @@ class _CardCaptureAnimationState extends State<CardCaptureAnimation>
           );
         }).toList(),
       ),
+    );
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: _moveAnimation.value + _bounceAnimation.value,
+          child: Transform.scale(
+            scale: _scaleAnimation.value,
+            child: child,
+          ),
+        );
+      },
+      child: stackChild,
     );
   }
 }
@@ -758,6 +995,7 @@ class _CardDeckToFieldAnimationState extends State<CardDeckToFieldAnimation>
   late Animation<double> _flipAnimation;
   late Animation<double> _scaleAnimation;
   late Animation<double> _elevationAnimation;
+  late Animation<Offset> _bounceAnimation;
 
   @override
   void initState() {
@@ -803,6 +1041,14 @@ class _CardDeckToFieldAnimationState extends State<CardDeckToFieldAnimation>
       curve: Curves.easeInOut,
     ));
 
+    _bounceAnimation = Tween<Offset>(
+      begin: const Offset(0, 0),
+      end: const Offset(0, -10),
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.6, 1.0, curve: Curves.elasticOut),
+    ));
+
     _controller.forward().then((_) {
       widget.onComplete?.call();
     });
@@ -820,14 +1066,13 @@ class _CardDeckToFieldAnimationState extends State<CardDeckToFieldAnimation>
       animation: _controller,
       builder: (context, child) {
         final angle = _flipAnimation.value * pi;
-        final isBack = angle < pi / 2;
+        final isBack = angle < pi / 2;  // 수정: π/2 미만일 때 뒷면, 이상일 때 앞면 (카드더미에서 뒤집어서 나오는 경우)
         
         // 고도 계산: 이동 중에 약간 위로 올라갔다가 내려옴 (더 자연스러운 곡선)
         final elevation = sin(_elevationAnimation.value * pi) * 15.0;
         
-        return Positioned(
-          left: _moveAnimation.value.dx,
-          top: _moveAnimation.value.dy - elevation,
+        return Transform.translate(
+          offset: Offset(_moveAnimation.value.dx + _bounceAnimation.value.dx, _moveAnimation.value.dy + _bounceAnimation.value.dy - elevation),
           child: Transform.scale(
             scale: _scaleAnimation.value,
             child: Transform(
@@ -850,9 +1095,12 @@ class _CardDeckToFieldAnimationState extends State<CardDeckToFieldAnimation>
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    isBack ? widget.backImage : widget.frontImage,
-                    fit: BoxFit.contain,
+                  child: Transform.scale(
+                    scaleX: isBack ? 1.0 : -1.0,  // 앞면일 때 좌우 반전
+                    child: Image.asset(
+                      isBack ? widget.backImage : widget.frontImage,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),
@@ -891,6 +1139,7 @@ class _CardPlayAnimationState extends State<CardPlayAnimation>
   late Animation<Offset> _moveAnimation;
   late Animation<double> _scaleAnimation;
   late Animation<double> _elevationAnimation;
+  late Animation<Offset> _bounceAnimation;
 
   @override
   void initState() {
@@ -909,14 +1158,21 @@ class _CardPlayAnimationState extends State<CardPlayAnimation>
       curve: Curves.easeInOutCubic,
     ));
 
-    // 확대 애니메이션: 시작할 때 확대, 끝날 때 정상 크기
-    _scaleAnimation = Tween<double>(
-      begin: 1.2,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
-    ));
+    // 확대 애니메이션: 40~60% 구간에서 1.0 -> 1.5, 이후 원래 크기로 복귀
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: ConstantTween<double>(1.0),
+        weight: 40,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 2.0).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 20,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 2.0, end: 1.0).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 40,
+      ),
+    ]).animate(_controller);
 
     // 고도 애니메이션: 시작할 때 위로 올라갔다가 내려옴
     _elevationAnimation = Tween<double>(
@@ -925,6 +1181,14 @@ class _CardPlayAnimationState extends State<CardPlayAnimation>
     ).animate(CurvedAnimation(
       parent: _controller,
       curve: Curves.easeOut,
+    ));
+
+    _bounceAnimation = Tween<Offset>(
+      begin: const Offset(0, 0),
+      end: const Offset(0, -10),
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.6, 1.0, curve: Curves.elasticOut),
     ));
 
     _controller.forward().then((_) {
@@ -946,14 +1210,13 @@ class _CardPlayAnimationState extends State<CardPlayAnimation>
         // 고도 계산: 시작할 때 위로 올라갔다가 내려옴 (더 자연스러운 높이)
         final elevation = _elevationAnimation.value * 25.0;
         
-        return Positioned(
-          left: _moveAnimation.value.dx,
-          top: _moveAnimation.value.dy - elevation,
+        return Transform.translate(
+          offset: Offset(_moveAnimation.value.dx + _bounceAnimation.value.dx, _moveAnimation.value.dy + _bounceAnimation.value.dy - elevation),
           child: Transform.scale(
             scale: _scaleAnimation.value,
             child: Container(
-              width: 72,
-              height: 108,
+              width: 48,
+              height: 72,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [

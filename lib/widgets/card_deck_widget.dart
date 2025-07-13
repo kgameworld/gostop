@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../utils/sound_manager.dart';
 
 class CardDeckController {
   VoidCallback? _flip;
@@ -14,6 +15,8 @@ class CardDeckWidget extends StatefulWidget {
   final CardDeckController? controller;
   final VoidCallback? onFlipComplete;
   final bool showCountLabel;
+  final double width; // 카드더미 가로 크기(반응형)
+  final double height; // 카드더미 세로 크기(반응형)
 
   const CardDeckWidget({
     super.key,
@@ -24,6 +27,8 @@ class CardDeckWidget extends StatefulWidget {
     this.controller,
     this.onFlipComplete,
     this.showCountLabel = true,
+    this.width = 48,
+    this.height = 72,
   });
 
   @override
@@ -71,6 +76,7 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
 
   void _startFlip() {
     if (isFlipping) return;
+    SoundManager.instance.play(Sfx.cardFlip);
     setState(() {
       isFlipping = true;
       showFront = false;
@@ -102,7 +108,8 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset(widget.emptyDeckImage, width: 72, height: 108, fit: BoxFit.contain),
+          // 카드더미가 비었을 때도 반응형 크기 적용
+          Image.asset(widget.emptyDeckImage, width: widget.width, height: widget.height, fit: BoxFit.contain),
           if (widget.showCountLabel)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -111,25 +118,30 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
         ],
       );
     }
+    // 카드더미 전체 크기 계산 (겹침 포함)
+    // 겹침 간격을 50% 더 촘촘하게 (0.125 → 0.0625, 0.042 → 0.021)
+    final deckWidth = widget.width + (visibleCount - 1) * (widget.width * 0.0625);
+    final deckHeight = widget.height + (visibleCount - 1) * (widget.height * 0.021);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: 48 + (visibleCount - 1) * 6.0,
-          height: 72 + (visibleCount - 1) * 3.0,
+          width: deckWidth,
+          height: deckHeight,
           child: Stack(
             alignment: Alignment.centerLeft,
             children: [
               for (int i = 0; i < visibleCount - (isFlipping ? 1 : 0); i++)
+                // 겹침 간격을 50% 더 촘촘하게
                 Positioned(
-                  left: i * 6.0,
-                  top: i * 3.0,
+                  left: i * (widget.width * 0.0625),
+                  top: i * (widget.height * 0.021),
                   child: AnimatedBuilder(
                     animation: _drawController,
                     builder: (context, child) {
                       final drawProgress = _drawController.value;
                       final isTopCard = i == visibleCount - 1;
-                      final offset = isTopCard && isDrawing ? drawProgress * 20 : 0.0;
+                      final offset = isTopCard && isDrawing ? drawProgress * (widget.height * 0.28) : 0.0;
                       return Transform.translate(
                         offset: Offset(0, -offset),
                         child: Transform.rotate(
@@ -138,7 +150,7 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
                             decoration: BoxDecoration(
                               boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(2, 2))],
                             ),
-                            child: Image.asset(widget.cardBackImage, width: 48, height: 72, fit: BoxFit.contain),
+                            child: Image.asset(widget.cardBackImage, width: widget.width, height: widget.height, fit: BoxFit.contain),
                           ),
                         ),
                       );
@@ -152,10 +164,10 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
                     final angle = _flipController.value * pi;
                     final isBack = angle < pi / 2 && !showFront;
                     return Positioned(
-                      left: (visibleCount - 1) * 6.0,
-                      top: (visibleCount - 1) * 3.0,
+                      left: (visibleCount - 1) * (widget.width * 0.0625),
+                      top: (visibleCount - 1) * (widget.height * 0.021),
                       child: Transform.translate(
-                        offset: Offset(0, -20 * sin(_flipController.value * pi)),
+                        offset: Offset(0, -(widget.height * 0.28) * sin(_flipController.value * pi)),
                         child: Transform(
                           alignment: Alignment.center,
                           transform: Matrix4.identity()
@@ -167,8 +179,8 @@ class _CardDeckWidgetState extends State<CardDeckWidget> with TickerProviderStat
                             ),
                             child: Image.asset(
                               isBack ? widget.cardBackImage : widget.emptyDeckImage,
-                              width: 48,
-                              height: 72,
+                              width: widget.width,
+                              height: widget.height,
                               fit: BoxFit.contain,
                             ),
                           ),

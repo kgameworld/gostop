@@ -1,0 +1,334 @@
+고스톱 게임 알고리즘 완전 설명서
+=====================================
+
+1. 게임 기본 구조
+==================
+
+1.1 게임 상태 관리
+------------------
+- currentPlayer: 현재 플레이어 (1 또는 2)
+- currentPhase: 현재 게임 단계
+  * TurnPhase.playingCard: 손패에서 카드 내는 중
+  * TurnPhase.flippingCard: 카드더미에서 카드 뒤집는 중
+  * TurnPhase.choosingMatch: 2장 매치 시 선택 중
+  * TurnPhase.turnEnd: 턴 종료 및 정산
+
+1.2 주요 변수들
+---------------
+- playedCard: 이번 턴에 낸 카드
+- pendingCaptured: 이번 턴에 획득할 예정인 카드들
+- choices: 2장 매치 시 선택할 카드들
+- drawnCard: 카드더미에서 뒤집은 카드
+- ppeokMonth: 뻑이 발생한 월 (null이면 뻑 상태 아님)
+- hadTwoMatch: 카드 내기 단계에서 2장 매치가 있었는지 여부
+
+2. 카드 내기 단계 (playCard)
+============================
+
+2.1 기본 처리 순서
+------------------
+1. 손패에서 카드 즉시 제거
+2. playedCard 설정
+3. 보너스피 체크
+4. 뻑 완성 체크
+5. 필드 매치 체크
+6. 매치 결과에 따른 처리
+
+2.2 보너스피 처리 (손패에서)
+---------------------------
+- 조건: card.isBonus == true
+- 처리:
+  * pendingCaptured에 추가
+  * 카드더미에서 한 장을 뒤집지 않고 손패로 가져옴
+  * currentPhase = TurnPhase.turnEnd
+  * _endTurn() 호출하여 즉시 턴 종료
+- 규칙: 맞고 게임에서 보너스피는 내자마자 즉시 먹고 턴 종료
+
+2.3 뻑 완성 체크
+---------------
+- 조건: ppeokMonth != null && card.month == ppeokMonth
+- 처리:
+  * 해당 월의 모든 카드를 pendingCaptured에 추가
+  * 필드에서 해당 월 카드들 제거
+  * _stealOpponentPi() 호출하여 피 강탈
+  * ppeokMonth = null로 초기화
+  * currentPhase = TurnPhase.flippingCard
+
+2.4 필드 매치 체크
+-----------------
+- 1장 매치:
+  * pendingCaptured에 [card, fieldMatches.first] 추가
+  * 필드에 card 추가 (겹침 표시)
+  * 애니메이션 트리거
+  * currentPhase = TurnPhase.flippingCard
+
+- 2장 매치:
+  * hadTwoMatch = true 설정
+  * 필드에 card 추가 (겹침 표시)
+  * currentPhase = TurnPhase.flippingCard
+
+- 3장 매치:
+  * pendingCaptured에 [card, ...fieldMatches] 추가
+  * 필드에 card 추가 (겹침 표시)
+  * 애니메이션 트리거
+  * currentPhase = TurnPhase.flippingCard
+
+- 매치 없음:
+  * 필드에 card 추가
+  * currentPhase = TurnPhase.flippingCard
+
+3. 카드더미 뒤집기 단계 (flipFromDeck)
+=====================================
+
+3.1 보너스피 처리 (카드더미에서)
+-------------------------------
+- 조건: drawnCard.isBonus == true
+- 처리:
+  * 필드에 drawnCard 추가 (내가 낸 카드 위에 올려놓기)
+  * 카드더미에서 한 장 더 뒤집기
+  * 두 번째 카드도 보너스피인 경우 필드에 추가하고 세 번째 카드 뒤집기
+  * 마지막 뒤집은 카드로 _processDrawnCard() 호출
+
+3.2 뒤집은 카드 처리 (_processDrawnCard)
+---------------------------------------
+
+3.2.1 뻑 완성 체크
+-----------------
+- 조건: ppeokMonth != null && drawnCard.month == ppeokMonth
+- 처리:
+  * 해당 월의 모든 카드를 필드에 남김 (획득/제거X)
+  * pendingCaptured, choices 초기화
+  * ppeokMonth = null로 초기화
+  * _endTurn() 호출
+
+3.2.2 쪽(쪽따먹기) 체크
+---------------------
+- 조건: pendingCaptured.isEmpty && playedCard != null && lastPlayedCard.month == drawnCard.month
+- 처리:
+  * pendingCaptured에 [lastPlayedCard, drawnCard] 추가
+  * 필드에서 lastPlayedCard 제거
+  * _stealOpponentPi() 호출
+  * _endTurn() 호출
+
+3.2.3 뻑 발생 체크
+-----------------
+- 조건: playedCard != null && playedCard.month == drawnCard.month && 필드에 같은 월 카드 있음
+- 처리:
+  * 해당 월의 모든 카드를 필드에 남김 (획득/제거X)
+  * pendingCaptured, choices 초기화
+  * ppeokMonth = drawnCard.month로 설정
+  * _endTurn() 호출
+
+3.2.4 따닥 체크
+--------------
+- 조건: fieldMatches.length == 2 && playedCard != null && 모든 카드가 같은 월
+- 처리:
+  * pendingCaptured에 [playedCard, drawnCard, ...fieldMatches] 추가
+  * 필드에 drawnCard 추가
+  * _stealOpponentPi() 호출
+  * _endTurn() 호출
+
+3.2.5 2장 매치 후 선택창 (hadTwoMatch)
+------------------------------------
+- 조건: hadTwoMatch && playedCard != null
+- 처리:
+  * 필드에 깔린 두 장을 choices로 설정
+  * pendingCaptured에 playedCard 추가
+  * 뒤집은 카드와 매치되는 필드 카드가 있으면 같이 추가
+  * currentPhase = TurnPhase.choosingMatch
+
+3.2.6 일반 2장 매치
+------------------
+- 조건: fieldMatches.length == 2
+- 처리:
+  * choices = fieldMatches
+  * pendingCaptured에 drawnCard 추가
+  * currentPhase = TurnPhase.choosingMatch
+
+3.2.7 일반 먹기
+--------------
+- 조건: fieldMatches.length == 1
+- 처리:
+  * pendingCaptured에 [drawnCard, fieldMatches.first] 추가 (중복 방지)
+  * 필드에 drawnCard 추가
+  * _endTurn() 호출
+
+3.2.8 매치 없음
+--------------
+- 조건: fieldMatches.isEmpty
+- 처리:
+  * 필드에 drawnCard 추가
+  * _endTurn() 호출
+
+4. 카드 선택 단계 (chooseMatch)
+==============================
+
+4.1 기본 처리
+-------------
+1. 선택한 카드를 pendingCaptured에 추가
+2. 필드에서 선택한 카드 제거
+3. choices 초기화
+
+4.2 두 번째 2장 매치 체크
+------------------------
+- 조건: drawnCard != null
+- 처리:
+  * 뒤집은 카드와 매치된 필드 2장 확인
+  * 2장 매치가 있으면:
+    - choices = drawnCardMatches
+    - pendingCaptured에 drawnCard 추가
+    - phase 유지 (choosingMatch)
+  * 2장 매치가 없으면:
+    - drawnCard = null
+    - hadTwoMatch = false
+    - choices 초기화
+    - currentPhase = TurnPhase.playingCard
+    - _endTurn() 호출
+
+5. 턴 종료 단계 (_endTurn)
+==========================
+
+5.1 기본 처리 순서
+------------------
+1. hadTwoMatch = false로 초기화
+2. pendingCaptured 처리
+3. 승리 조건 체크
+4. 턴 전환
+
+5.2 pendingCaptured 처리
+-----------------------
+1. pendingCaptured에 있는 카드들을 필드에서 제거
+2. 중복 제거하여 uniqueCards 생성
+3. capturedCards에 추가
+
+5.3 승리 조건 체크
+-----------------
+- 조건: calculateScore(currentPlayer) >= 7
+- 처리:
+  * awaitingGoStop = true
+  * currentPhase = TurnPhase.turnEnd
+  * 턴 전환하지 않고 고/스톱 선택 대기
+
+5.4 턴 전환
+-----------
+- nextPlayer = (currentPlayer % 2) + 1
+- currentPlayer = nextPlayer
+- currentPhase = TurnPhase.playingCard
+- logger.incrementTurn()
+
+6. 점수 계산 (calculateScore)
+============================
+
+6.1 기본 점수 계산
+-----------------
+- captured = getCaptured(playerNum) + pendingCaptured (현재 플레이어만)
+- baseScore = 0으로 시작
+
+6.2 광 점수
+----------
+- gwangCards = captured에서 type == '광'인 카드들
+- hasRainGwang = 11월 광(비광) 포함 여부
+- 3광: 비광 포함 시 2점, 비광 없으면 3점
+- 4광: 4점
+- 5광 이상: 15점
+
+6.3 띠 점수
+----------
+- ttiCards = captured에서 type == '띠'인 카드들
+- 5띠 이상: (ttiCards.length - 4)점
+
+6.4 피 점수
+----------
+- piCards = captured에서 type == '피'인 카드들
+- totalPi 계산:
+  * bonus_3pi: 3점
+  * bonus_ssangpi: 2점
+  * 3pi: 3점
+  * ssangpi: 2점
+  * 일반 피: 1점
+- 10피 이상: (totalPi - 9)점
+
+6.5 오 점수
+----------
+- ohCards = captured에서 type == '오'인 카드들
+- 2오 이상: (ohCards.length - 1)점
+
+6.6 고스톱 보너스
+---------------
+- goCount == 1: +1점
+- goCount == 2: +2점
+- goCount >= 3: (baseScore + 2) * (2^(goCount - 2))
+
+7. 특수 규칙
+============
+
+7.1 피 강탈 (_stealOpponentPi)
+-----------------------------
+- 우선순위: 일반 피 > 쌍피 > 보너스피
+- 상대방 획득 카드에서 해당 피를 제거하고 pendingCaptured에 추가
+
+7.2 고/스톱 선언
+--------------
+- declareGo(): goCount++, awaitingGoStop = false, 턴 유지
+- declareStop(): winner 설정, gameOver = true
+
+8. UI 연동
+==========
+
+8.1 카드 클릭 처리 (onCardTap)
+-----------------------------
+1. 애니메이션 중이면 무시
+2. 현재 플레이어가 아니거나 playingCard 단계가 아니면 무시
+3. 손패에서 카드 즉시 제거
+4. 애니메이션 실행
+5. engine.playCard() 호출
+6. 보너스피인 경우 즉시 return (카드더미 뒤집기 생략)
+7. choosingMatch 상태면 선택 다이얼로그 표시
+8. _flipCardFromDeck() 호출
+
+8.2 카드더미 뒤집기 (_flipCardFromDeck)
+-------------------------------------
+1. flippingCard 단계가 아니면 무시
+2. 애니메이션 실행
+3. engine.flipFromDeck() 호출
+4. AI 턴에서 choosingMatch 상태면 자동 선택
+5. 플레이어 턴에서 choosingMatch 상태면 선택 다이얼로그 표시
+
+9. 현재 구현된 기능들
+=====================
+
+9.1 완전 구현된 기능
+-------------------
+- 기본 카드 매치 시스템 (1장/2장/3장)
+- 보너스피 처리 (손패/카드더미)
+- 뻑/따닥/쪽 특수 규칙
+- 점수 계산 시스템
+- 턴 진행 시스템
+- AI 자동 플레이
+- 애니메이션 시스템
+
+9.2 개선된 부분
+--------------
+- 무한 루프 방지
+- 보너스피 규칙 정확한 구현
+- 카드 상태 일관성 확보
+- 코드 구조 개선
+
+10. 주의사항
+============
+
+10.1 현재 제한사항
+-----------------
+- 보너스피는 내자마자 즉시 턴 종료 (맞고 규칙)
+- 카드더미에서 보너스피는 필드에 올려놓고 계속 진행
+- 2장 매치 시 선택창 필수
+
+10.2 버그 수정 완료
+-----------------
+- 무한 루프 문제 해결
+- 보너스피 처리 로직 정확화
+- 카드 상태 불일치 해결
+- 턴 진행 로직 개선
+
+이 문서는 현재 고스톱 게임의 모든 알고리즘과 로직을 상세히 설명합니다.
+개발자는 이 문서를 참고하여 게임 시스템을 정확히 구현할 수 있습니다. 

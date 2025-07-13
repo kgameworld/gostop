@@ -71,12 +71,20 @@ class DeckManager {
     // 중복 검증: 전체 카드가 정확히 한 번씩만 존재해야 함
     final allIds = <int>{};
     for (var h in playerHands.values) {
-      for (var c in h) allIds.add(c.id);
+      for (var c in h) {
+        allIds.add(c.id);
+      }
     }
-    for (var c in fieldCards) allIds.add(c.id);
-    for (var c in drawPile) allIds.add(c.id);
+    for (var c in fieldCards) {
+      allIds.add(c.id);
+    }
+    for (var c in drawPile) {
+      allIds.add(c.id);
+    }
     for (var p in capturedCards.values) {
-      for (var c in p) allIds.add(c.id);
+      for (var c in p) {
+        allIds.add(c.id);
+      }
     }
     assert(allIds.length == goStopCards.where((card) => card.type != 'back').length, '카드 중복 또는 누락 발생!');
 

@@ -142,7 +142,7 @@ class _AnimatedCardDeckState extends State<AnimatedCardDeck>
                 shakeOffset + tensionOffset,
                 hoverOffset,
               ),
-              child: Container(
+              child: SizedBox(
                 width: deckWidth,
                 height: deckHeight,
                 child: Stack(

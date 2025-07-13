@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../l10n/app_localizations.dart';
 import '../utils/matgo_engine.dart';
 import '../models/card_model.dart';
 import '../screens/gostop_board.dart';
@@ -6,10 +8,23 @@ import '../utils/deck_manager.dart';
 import '../widgets/card_deck_widget.dart';
 import '../animations.dart';
 import '../widgets/particle_system.dart';
-import '../widgets/animated_card_deck.dart';
 import '../utils/animation_pool.dart';
 import '../widgets/game_log_viewer.dart';
 import 'dart:async';
+import '../utils/sound_manager.dart';
+import '../widgets/bgm_toggle_button.dart';
+import '../widgets/score_board.dart';
+import '../widgets/heundal_selection_dialog.dart';
+import '../widgets/go_animation_widget.dart';
+import '../widgets/go_selection_dialog.dart';
+import '../utils/coin_service.dart';
+import '../widgets/coin_box.dart';
+import '../widgets/language_selector.dart';
+import '../screens/settings_page.dart';
+import '../providers/auth_provider.dart';
+import '../widgets/settings_dialog.dart';
+import 'dart:math';
+import '../providers/locale_provider.dart';
 
 class GamePage extends StatefulWidget {
   final String mode;
@@ -35,6 +50,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   // 긴장감 모드
   bool isTensionMode = false;
 
+  // 뻑 이펙트 테스트 상태
+  bool showPpeokEffect = false;
+
   // 필드 카드별 GlobalKey 관리
   final Map<String, GlobalKey> fieldCardKeys = {};
   
@@ -53,15 +71,28 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
     engine = MatgoEngine(deckManager);
     
-    // 애니메이션 이벤트 리스너 설정 (임시 비활성화)
+    // 애니메이션 이벤트 리스너 설정
     // engine.setAnimationListener(_handleAnimationEvent);
+    
+    // 턴 종료 후 UI 업데이트 콜백 설정
+    engine.onTurnEnd = () {
+      setState(() {
+        // 턴 종료 후에만 UI 업데이트
+      });
+      
+      // AI 턴인 경우 자동으로 시작 (단, GO/STOP 대기 상태가 아닐 때만)
+      if (engine.currentPlayer == 2 && !engine.isGameOver() && !engine.awaitingGoStop) {
+        _runAiTurnIfNeeded();
+      }
+    };
     
     _runAiTurnIfNeeded();
   }
 
-  @override
-  void dispose() {
-    super.dispose();
+
+  // 애니메이션 헬퍼: 애니메이션 완료 후 로직 실행
+  Future<void> runAndAwait(Future<void> anim) async {
+    await anim;
   }
 
   // 애니메이션 이벤트 처리
@@ -106,7 +137,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         final cards = event.data['cards'] as List<GoStopCard>;
         final player = event.data['player'] as int;
         final fromOffset = _getCardPosition('field', cards.first);
-        final toOffset = _getCardPosition('captured', cards.first);
+        final toOffset = _getCardPosition('captured', cards.first, playerId: player);
         setState(() {
           isAnimating = true;
           activeAnimations.add(
@@ -126,14 +157,19 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         });
         break;
       case AnimationEventType.specialEffect:
+      case AnimationEventType.ppeok:
+      case AnimationEventType.piSteal:
+      case AnimationEventType.sseul:
+      case AnimationEventType.bomb:
         _handleSpecialEffect(event.data);
         break;
       case AnimationEventType.bonusCard:
-        // 보너스카드: 낸 카드가 바로 먹은 카드 영역으로 이동
         final card = event.data['card'] as GoStopCard;
         final player = event.data['player'] as int;
-        final fromOffset = _getCardPosition(player == 1 ? 'hand' : 'ai_hand', card);
-        final toOffset = _getCardPosition('captured', card);
+        // 카드더미에서 뒤집힌 보너스카드 애니메이션 (플레이어/AI 공통)
+        final fromOffset = _getCardPosition('deck', card);
+        // 잠시 필드 겹침 위치로 이동 후, _endTurn 에서 캡처 애니메이션이 다시 실행됨
+        final toOffset = _getCardPosition('field', card);
         setState(() {
           isAnimating = true;
           activeAnimations.add(
@@ -228,30 +264,93 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     });
   }
 
-  // 필드에 카드가 놓일 빈 자리(그룹) 위치를 계산하는 헬퍼 함수
+  // 필드에 카드가 놓일 빈 자리(그룹) 위치를 계산하는 헬퍼 함수 (원형 배치에 맞게 수정)
   Offset _getEmptyFieldGroupPosition(int groupIndex) {
-    // _fieldZone의 배치 규칙과 동일하게 좌표 계산
-    // 윗 행 4개
-    if (groupIndex < 4) {
-      return Offset(80.0 + groupIndex * 90.0, 0.0);
-    }
-    // 왼쪽 2개
-    if (groupIndex < 6) {
-      return Offset(0.0, 90.0 + (groupIndex - 4) * 90.0);
-    }
-    // 오른쪽 2개
-    if (groupIndex < 8) {
-      return Offset(520.0 - 48.0, 90.0 + (groupIndex - 6) * 90.0);
-    }
-    // 아래 행 4개
-    return Offset(80.0 + (groupIndex - 8) * 90.0, 360.0 - 72.0);
+    final size = MediaQuery.of(context).size;
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    
+    // 원형 배치: 가로와 세로 반지름을 동일하게 설정
+    final radius = (size.width < size.height 
+      ? size.width * 0.35  // 세로가 긴 경우 가로 기준
+      : size.height * 0.35); // 가로가 긴 경우 세로 기준
+    
+    final angle = (groupIndex / 12) * 2 * pi - pi / 2; // 12시 방향부터 시작
+    
+    // 원형 배치 좌표 계산
+    final x = centerX + radius * cos(angle) - 24; // 카드 너비의 절반만큼 조정
+    final y = centerY + radius * sin(angle) - 36; // 카드 높이의 절반만큼 조정
+    
+    return Offset(x, y);
   }
 
   // 1단계: 손패 카드 탭 처리
   Future<void> onCardTap(GoStopCard card) async {
+    // 입력 락 체크
+    if (engine.tapLock) return;
+    engine.tapLock = true;
+    
     if (isAnimating) return;
     if (engine.currentPlayer != 1 || engine.currentPhase != TurnPhase.playingCard) {
+      engine.tapLock = false; // 락 해제
       return;
+    }
+
+    // 폭탄 조건: 손패 3장+필드 1장 이상이면 흔들 다이얼로그 없이 자동 폭탄 발동
+    final hand = engine.getHand(1);
+    final sameMonthCards = hand.where((c) => c.month == card.month).toList();
+    final field = engine.getField();
+    final fieldSameMonth = field.where((c) => c.month == card.month).toList();
+    if (sameMonthCards.length >= 3 && fieldSameMonth.isNotEmpty) {
+      // 3장 모두 playCard로 전달 (자동 폭탄)
+      for (final bombCard in sameMonthCards.take(3)) {
+        setState(() {
+          engine.playCard(bombCard, groupIndex: null);
+        });
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+      await _flipCardFromDeck();
+      engine.tapLock = false;
+      return;
+    }
+
+    // 흔들 조건 체크
+    if (engine.shouldShowHeundalDialog(card, 1)) {
+      final heundalCards = engine.getHeundalCards(card, 1);
+      final bool? heundalChoice = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => HeundalSelectionDialog(
+          heundalCards: heundalCards,
+          selectedCard: card,
+          onHeundalChoice: (bool choice) {
+            Navigator.of(context).pop(choice);
+          },
+        ),
+      );
+      
+      if (heundalChoice == null) {
+        engine.tapLock = false;
+        return;
+      }
+      
+      if (heundalChoice) {
+        // 흔들 선언
+        engine.declareHeundal(1);
+      }
+    }
+    
+    // 손패에서 실제 카드 위치 계산 (제거 전에 GlobalKey로 위치 계산)
+    Offset fromOffset;
+    final playerHandList = engine.getHand(1);
+    final cardIdx = playerHandList.indexWhere((c) => c.id == card.id);
+    final GlobalKey? cardKey = boardKey.currentState?.getHandCardKey(cardIdx);
+    if (cardKey != null && cardKey.currentContext != null) {
+      final RenderBox box = cardKey.currentContext!.findRenderObject() as RenderBox;
+      fromOffset = box.localToGlobal(Offset.zero);
+    } else {
+      // fallback
+      fromOffset = _getCardPosition('hand', card);
     }
     
     // 실제 카드가 이동하는 것처럼 보이도록 즉시 손패에서 제거
@@ -259,61 +358,54 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     engine.deckManager.playerHands[playerIdx]?.removeWhere((c) => c.id == card.id);
     setState(() {}); // UI 즉시 업데이트
     
-    // 손패에서 실제 카드 위치 계산 (제거된 후의 위치)
-    final fromOffset = _getCardPosition('hand', card);
-    
-    // 매치 카드의 실제 위치 계산
+    // 보너스피는 필드를 거치지 않고 바로 획득 영역으로 이동
     GoStopCard? matchCard;
-    for (final c in engine.getField()) {
-      if (c.month == card.month && !c.isBonus) {
-        matchCard = c;
-        break;
+    Offset destinationOffset;
+    if (card.isBonus) {
+      destinationOffset = _getCardPosition('captured', card, playerId: 1);
+    } else {
+      // 매치 카드의 실제 위치 계산 (GlobalKey 사용 - 하나의 기준 좌표계)
+      for (final c in engine.getField()) {
+        if (c.month == card.month && !c.isBonus) {
+          matchCard = c;
+          break;
+        }
       }
-    }
-    Offset? matchCardOffset;
-    if (matchCard != null) {
-      final key = fieldCardKeys[matchCard.id.toString()];
-      if (key is GlobalKey && key.currentContext != null && fieldStackKey.currentContext != null) {
-        final RenderBox cardBox = key.currentContext!.findRenderObject() as RenderBox;
-        final RenderBox stackBox = fieldStackKey.currentContext!.findRenderObject() as RenderBox;
-        final Offset stackTopLeft = stackBox.localToGlobal(Offset.zero);
-        final Offset cardInStack = cardBox.localToGlobal(Offset.zero, ancestor: stackBox);
-        matchCardOffset = stackTopLeft + cardInStack;
+      if (matchCard != null) {
+        final key = fieldCardKeys[matchCard.id.toString()];
+        if (key is GlobalKey && key.currentContext != null) {
+          final RenderBox cardBox = key.currentContext!.findRenderObject() as RenderBox;
+          final baseOffset = cardBox.localToGlobal(Offset.zero);
+          // 매치가 있으면 겹침 위치로, 없으면 원래 위치로 (애니메이션과 겹침 통합)
+          const double cardWidth = 48.0;
+          const double cardHeight = 72.0;
+          const double overlapOffsetX = cardWidth * 0.3; // 카드 너비의 30% 겹침
+          const double overlapOffsetY = cardHeight * 0.1; // 카드 높이의 10% 겹침
+          destinationOffset = Offset(
+            baseOffset.dx + overlapOffsetX,
+            baseOffset.dy + overlapOffsetY,
+          );
+        } else {
+          destinationOffset = _getCardPosition('field', card);
+        }
+      } else {
+        destinationOffset = _getCardPosition('field', card);
       }
     }
 
-    
     final completer = Completer<void>();
-    _playCardWithAnimation(card, fromOffset, matchCardOffset ?? _getActualFieldPosition(card), () async {
-      if (matchCard != null && matchCardOffset != null && matchCard.imageUrl != null) {
-        setState(() {
-          activeAnimations.add(
-            Stack(
-              children: [
-                if (matchCardOffset != null && matchCard?.imageUrl != null)
-                  Positioned(
-                    left: matchCardOffset.dx,
-                    top: matchCardOffset.dy,
-                    child: Image.asset(matchCard!.imageUrl, width: 48, height: 72),
-                  ),
-                if (matchCardOffset != null)
-                  Positioned(
-                    left: matchCardOffset.dx + 12,
-                    top: matchCardOffset.dy + 6,
-                    child: Image.asset(card.imageUrl, width: 48, height: 72),
-                  ),
-              ],
-            ),
-          );
-        });
-        await Future.delayed(const Duration(milliseconds: 500));
-        setState(() {
-          activeAnimations.removeWhere((w) => w is Stack);
-        });
-      }
+    _playCardWithAnimation(card, fromOffset, destinationOffset, () async {
+      // 애니메이션 완료 = 겹침 연출 완료 (하나의 연속된 동작)
       setState(() {
         engine.playCard(card, groupIndex: null);
       });
+      
+      // 보너스피를 낸 경우 턴이 계속되므로 카드더미 뒤집기 생략
+      if (card.isBonus) {
+        completer.complete();
+        return;
+      }
+      
       // 따닥(choosingMatch) 상태면 바로 선택 다이얼로그 호출
       if (engine.currentPhase == TurnPhase.choosingMatch) {
         await _showMatchChoiceDialog();
@@ -322,7 +414,18 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     });
     await completer.future;
     await Future.delayed(const Duration(milliseconds: 500));
+    
+    // 보너스피를 낸 경우 턴이 계속되므로 카드더미 뒤집기 생략
+    if (card.isBonus) {
+      // 애니메이션 완료 후 입력 락 해제 (턴 계속)
+      engine.tapLock = false;
+      return;
+    }
+    
     await _flipCardFromDeck();
+    
+    // 애니메이션 완료 후 입력 락 해제
+    engine.tapLock = false;
   }
 
   // 2단계: 카드 더미 뒤집기 로직 (자연스러운 뒤집기+이동 애니메이션)
@@ -332,38 +435,32 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     }
     final drawnCard = engine.deckManager.drawPile.isNotEmpty ? engine.deckManager.drawPile.first : null;
     if (drawnCard != null) {
-      // 카드가 필드에 깔릴 자리의 GlobalKey 위치 계산
-      final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
-      Offset? fieldOffset;
-      if (drawnCard.month > 0 && drawnCard.month <= 12 && groupKeys != null && drawnCard.month - 1 < groupKeys.length) {
-        final fieldKey = groupKeys[drawnCard.month - 1];
-        if (fieldKey is GlobalKey && fieldKey.currentContext != null) {
-          final RenderBox box = fieldKey.currentContext!.findRenderObject() as RenderBox;
-          fieldOffset = box.localToGlobal(Offset.zero);
-        }
-      }
-      // 카드 더미 위치 계산
+      // 카드 더미 위치 계산 (GlobalKey 사용)
       final deckKey = boardKey.currentState?.deckKey;
       Offset? deckOffset;
       if (deckKey is GlobalKey && deckKey.currentContext != null) {
         final RenderBox box = deckKey.currentContext!.findRenderObject() as RenderBox;
         deckOffset = box.localToGlobal(Offset.zero);
       }
-      // 통합된 뒤집기+이동 애니메이션 실행
-      if (fieldOffset == null || deckOffset == null) {
-        // 한 프레임 대기 후 재시도
-        await Future.delayed(const Duration(milliseconds: 16));
-        if (deckKey is GlobalKey && deckKey.currentContext != null) {
-          final RenderBox box = deckKey.currentContext!.findRenderObject() as RenderBox;
-          deckOffset = box.localToGlobal(Offset.zero);
+      
+      // 필드 도착 위치 계산 (GlobalKey 사용 - 하나의 기준 좌표계)
+      Offset? fieldOffset;
+      if (drawnCard.month > 0 && drawnCard.month <= 12) {
+        final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
+        if (groupKeys != null && drawnCard.month - 1 < groupKeys.length) {
+          final groupKey = groupKeys[drawnCard.month - 1];
+          if (groupKey is GlobalKey && groupKey.currentContext != null) {
+            final RenderBox groupBox = groupKey.currentContext!.findRenderObject() as RenderBox;
+            fieldOffset = groupBox.localToGlobal(Offset.zero);
+          }
         }
-        // fieldOffset도 마찬가지로 재계산 필요 (여기서는 이미 위에서 계산된 값 사용)
       }
-      // 그래도 null이면 기본값(중앙) 사용
+      
+      // fallback 위치 (GlobalKey 측정 실패 시)
       final size = MediaQuery.of(context).size;
       deckOffset ??= Offset(size.width / 2 - 24, size.height / 2 - 36);
       fieldOffset ??= Offset(size.width / 2 - 24, size.height / 2 - 36);
-      // 반드시 애니메이션 실행
+
       final completer = Completer<void>();
       setState(() {
         isAnimating = true;
@@ -391,13 +488,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     setState(() {
       engine.flipFromDeck();
     });
-    
-    // AI 턴에서 2장 선택창이 뜨면 자동으로 선택
+    await Future.delayed(const Duration(milliseconds: 100));
     if (engine.currentPhase == TurnPhase.choosingMatch && engine.currentPlayer == 2) {
       final choices = engine.choices;
       if (choices.isNotEmpty) {
-        // AI는 점수에 유리한 카드를 선택 (광 > 띠 > 동물 > 피 순서)
-        GoStopCard selectedCard = choices.first; // 기본값
+        GoStopCard selectedCard = choices.first;
         for (final choice in choices) {
           if (choice.type == '광') {
             selectedCard = choice;
@@ -407,15 +502,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           } else if (choice.type == '동물' && selectedCard.type != '광' && selectedCard.type != '띠') {
             selectedCard = choice;
           } else if (choice.type == '피' && selectedCard.type == '피') {
-            // 피는 마지막 선택
             selectedCard = choice;
           }
         }
-        
         setState(() => engine.chooseMatch(selectedCard));
         await Future.delayed(const Duration(milliseconds: 500));
-        
-        // 두 번째 2장 매치가 있을 수도 있으므로 재귀적으로 처리
         if (engine.currentPhase == TurnPhase.choosingMatch && engine.currentPlayer == 2) {
           final secondChoices = engine.choices;
           if (secondChoices.isNotEmpty) {
@@ -432,22 +523,15 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                 secondSelectedCard = choice;
               }
             }
-            
             setState(() => engine.chooseMatch(secondSelectedCard));
             await Future.delayed(const Duration(milliseconds: 500));
           }
         }
       }
     } else if (engine.currentPhase == TurnPhase.choosingMatch) {
-      // 플레이어 턴에서는 선택창 표시
       await _showMatchChoiceDialog();
     }
-    
-    if (engine.currentPhase == TurnPhase.playingCard && engine.currentPlayer == 2) {
-      await _runAiTurnIfNeeded();
-    }
-    
-    setState(() {}); // 상태 꼬임 방지: 항상 UI 갱신
+    setState(() {});
   }
 
   // '따닥' 선택 대화상자
@@ -455,17 +539,32 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final chosenCard = await showDialog<GoStopCard>(
       context: context,
       builder: (context) {
+        // 적응형 레이아웃: 화면 크기에 따른 선택창 배치 조정
+        final maxWidth = MediaQuery.of(context).size.width;
+        final useGridLayout = maxWidth < 320;
+        
         return AlertDialog(
-          title: const Text('먹을 카드를 선택하세요'),
-          content: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: engine.choices
-                .map((card) => GestureDetector(
-                      onTap: () => Navigator.pop(context, card),
-                      child: Image.asset(card.imageUrl, width: 80),
-                    ))
-                .toList(),
-          ),
+          title: Text(AppLocalizations.of(context)!.selectCardToEat),
+          content: useGridLayout
+              ? GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  children: engine.choices
+                      .map((card) => GestureDetector(
+                            onTap: () => Navigator.pop(context, card),
+                            child: Image.asset(card.imageUrl, width: 80),
+                          ))
+                      .toList(),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: engine.choices
+                      .map((card) => GestureDetector(
+                            onTap: () => Navigator.pop(context, card),
+                            child: Image.asset(card.imageUrl, width: 80),
+                          ))
+                      .toList(),
+                ),
         );
       },
     );
@@ -479,9 +578,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       // 첫 번째 선택 완료 후, 여전히 choosingMatch 상태라면 두 번째 선택창 띄우기
       if (engine.currentPhase == TurnPhase.choosingMatch) {
         await _showMatchChoiceDialog(); // 재귀 호출로 두 번째 선택창
-      } else if (engine.currentPhase == TurnPhase.playingCard) {
-        await _runAiTurnIfNeeded();
       }
+      // AI 턴 호출 제거 - onTurnEnd 콜백에서만 호출되도록 함
     }
   }
 
@@ -499,115 +597,98 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     engine.deckManager.playerHands[playerIdx]?.removeWhere((c) => c.id == aiCardToPlay.id);
     setState(() {}); // UI 즉시 업데이트
     
-    final fromOffset = _getCardPosition('ai_hand', aiCardToPlay);
-    // 매치 카드의 실제 위치 계산 (플레이어와 동일)
-    GoStopCard? matchCard;
-    for (final c in engine.getField()) {
-      if (c.month == aiCardToPlay.month && !c.isBonus) {
-        matchCard = c;
-        break;
-      }
+    // AI 카드의 실제 위치 계산 (GlobalKey 사용 - 하나의 기준 좌표계)
+    Offset fromOffset;
+    final aiHandList = engine.getHand(2);
+    final aiCardIdx = aiHandList.indexWhere((c) => c.id == aiCardToPlay.id);
+    final GlobalKey? aiCardKey = boardKey.currentState?.getHandCardKey(aiCardIdx);
+    if (aiCardKey != null && aiCardKey.currentContext != null) {
+      final RenderBox box = aiCardKey.currentContext!.findRenderObject() as RenderBox;
+      fromOffset = box.localToGlobal(Offset.zero);
+    } else {
+      fromOffset = _getCardPosition('ai_hand', aiCardToPlay);
     }
-    Offset? matchCardOffset;
-    if (matchCard != null) {
-      final key = fieldCardKeys[matchCard.id.toString()];
-      if (key is GlobalKey && key.currentContext != null && fieldStackKey.currentContext != null) {
-        final RenderBox cardBox = key.currentContext!.findRenderObject() as RenderBox;
-        final RenderBox stackBox = fieldStackKey.currentContext!.findRenderObject() as RenderBox;
-        final Offset stackTopLeft = stackBox.localToGlobal(Offset.zero);
-        final Offset cardInStack = cardBox.localToGlobal(Offset.zero, ancestor: stackBox);
-        matchCardOffset = stackTopLeft + cardInStack;
-      }
-    }
-    // AI도 먹을 카드가 없으면 카드더미 뒤집기와 동일하게 빈자리 위치로 애니메이션
-    if (matchCard == null) {
-      int groupIdx = -1;
-      final boardState = boardKey.currentState;
-      if (boardState != null) {
-        final emptyKeys = boardState.getEmptyGroupKeys();
-        groupIdx = aiCardToPlay.month - 1;
-        if (groupIdx >= 0 && groupIdx < emptyKeys.length) {
-          final key = emptyKeys[groupIdx];
-          Offset? groupOffset;
-          if (key is GlobalKey && key.currentContext != null) {
-            final RenderBox box = key.currentContext!.findRenderObject() as RenderBox;
-            final Offset pos = box.localToGlobal(Offset.zero);
-            groupOffset = pos;
-          } else {
-            await Future.delayed(const Duration(milliseconds: 16));
-            if (key is GlobalKey && key.currentContext != null) {
-              final RenderBox box = key.currentContext!.findRenderObject() as RenderBox;
-              final Offset pos = box.localToGlobal(Offset.zero);
-              groupOffset = pos;
-            }
-          }
-          if (groupOffset != null) {
-            final completer = Completer<void>();
-            _playCardWithAnimation(aiCardToPlay, fromOffset, groupOffset, () async {
-              setState(() => engine.playCard(aiCardToPlay));
-              completer.complete();
-            });
-            await completer.future;
-            await Future.delayed(const Duration(milliseconds: 500));
-            await _flipCardFromDeck();
-            
-            // AI 턴에서도 고/스톱 결정과 턴 계속 처리
-            if (engine.awaitingGoStop) {
-              if (engine.calculateScore(2) >= 3) {
-                setState(() => engine.declareGo());
-                await _runAiTurnIfNeeded();
-              } else {
-                setState(() => engine.declareStop());
-                _showGameOverDialog();
-              }
-            } else if (engine.currentPhase == TurnPhase.playingCard && engine.currentPlayer == 2) {
-              await _runAiTurnIfNeeded();
-            }
-            
-            return;
-          }
+    
+    // AI 카드가 이동할 필드 위치 계산 (GlobalKey 사용)
+    Offset toOffset;
+    GoStopCard? aiMatchCard; // AI가 매치할 카드
+    
+    if (aiCardToPlay.month > 0 && aiCardToPlay.month <= 12) {
+      // 먼저 매치할 카드가 있는지 확인
+      for (final c in engine.getField()) {
+        if (c.month == aiCardToPlay.month && !c.isBonus) {
+          aiMatchCard = c;
+          break;
         }
       }
-      // fallback: 애니메이션 없이 처리
-      setState(() => engine.playCard(aiCardToPlay));
-      await Future.delayed(const Duration(milliseconds: 500));
-      await _flipCardFromDeck();
-      return;
-    }
-    final toOffset = matchCardOffset ?? _getCardPosition('field', aiCardToPlay);
-    final completer = Completer<void>();
-    _playCardWithAnimation(aiCardToPlay, fromOffset, toOffset, () async {
-      if (matchCard != null && matchCardOffset != null && matchCard.imageUrl != null) {
-        setState(() {
-          activeAnimations.add(
-            Stack(
-              children: [
-                if (matchCardOffset != null && matchCard?.imageUrl != null)
-                  Positioned(
-                    left: matchCardOffset.dx,
-                    top: matchCardOffset.dy,
-                    child: Image.asset(matchCard!.imageUrl, width: 48, height: 72),
-                  ),
-                if (matchCardOffset != null)
-                  Positioned(
-                    left: matchCardOffset.dx + 12,
-                    top: matchCardOffset.dy + 6,
-                    child: Image.asset(aiCardToPlay.imageUrl, width: 48, height: 72),
-                  ),
-              ],
-            ),
+      
+      // 매치할 카드가 있으면 해당 카드 위치로, 없으면 빈 그룹 위치로
+      if (aiMatchCard != null) {
+        final key = fieldCardKeys[aiMatchCard.id.toString()];
+        if (key is GlobalKey && key.currentContext != null) {
+          final RenderBox cardBox = key.currentContext!.findRenderObject() as RenderBox;
+          final baseOffset = cardBox.localToGlobal(Offset.zero);
+          // 매치가 있으면 겹침 위치로, 없으면 원래 위치로 (애니메이션과 겹침 통합)
+          const double cardWidth = 48.0;
+          const double cardHeight = 72.0;
+          const double overlapOffsetX = cardWidth * 0.3; // 카드 너비의 30% 겹침
+          const double overlapOffsetY = cardHeight * 0.1; // 카드 높이의 10% 겹침
+          toOffset = Offset(
+            baseOffset.dx + overlapOffsetX,
+            baseOffset.dy + overlapOffsetY,
           );
-        });
-        await Future.delayed(const Duration(milliseconds: 500));
-        setState(() {
-          activeAnimations.removeWhere((w) => w is Stack);
-        });
+        } else {
+          toOffset = _getCardPosition('field', aiCardToPlay);
+        }
+      } else {
+        final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
+        if (groupKeys != null && aiCardToPlay.month - 1 < groupKeys.length) {
+          final groupKey = groupKeys[aiCardToPlay.month - 1];
+          if (groupKey is GlobalKey && groupKey.currentContext != null) {
+            final RenderBox groupBox = groupKey.currentContext!.findRenderObject() as RenderBox;
+            toOffset = groupBox.localToGlobal(Offset.zero);
+          } else {
+            toOffset = _getCardPosition('field', aiCardToPlay);
+          }
+        } else {
+          toOffset = _getCardPosition('field', aiCardToPlay);
+        }
       }
-      setState(() => engine.playCard(aiCardToPlay));
-      completer.complete();
-    });
+    } else {
+      toOffset = _getCardPosition('field', aiCardToPlay);
+    }
+
+    final completer = Completer<void>();
+    
+    // 보너스피인 경우 바로 먹은 카드로 이동하는 애니메이션
+    if (aiCardToPlay.isBonus) {
+      // 보너스피는 필드로 가지 않고 바로 먹은 카드 영역으로 이동
+      final capturedOffset = _getCardPosition('ai_captured', aiCardToPlay);
+      _playCardWithAnimation(aiCardToPlay, fromOffset, capturedOffset, () async {
+        // 애니메이션 완료 = 보너스피 즉시 캡처
+        setState(() => engine.playCard(aiCardToPlay));
+        SoundManager.instance.play(Sfx.cardPlay);
+        completer.complete();
+      });
+    } else {
+      // 일반 카드는 필드로 이동하는 애니메이션
+      _playCardWithAnimation(aiCardToPlay, fromOffset, toOffset, () async {
+        // 애니메이션 완료 = 겹침 연출 완료 (하나의 연속된 동작)
+        setState(() => engine.playCard(aiCardToPlay));
+        SoundManager.instance.play(Sfx.cardPlay);
+        completer.complete();
+      });
+    }
+    
     await completer.future;
     await Future.delayed(const Duration(milliseconds: 500));
+    
+    // 보너스피를 낸 경우 턴이 계속되므로 카드더미 뒤집기 생략하고 다음 카드 선택
+    if (aiCardToPlay.isBonus) {
+      // 보너스피를 낸 후에도 턴이 계속되므로 재귀적으로 다음 카드 선택
+      await _runAiTurnIfNeeded();
+      return;
+    }
     
     // AI 턴에서 2장 선택창이 뜨면 자동으로 선택
     if (engine.currentPhase == TurnPhase.choosingMatch && engine.currentPlayer == 2) {
@@ -662,28 +743,67 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     
     // AI 턴에서도 고/스톱 결정과 턴 계속 처리
     if (engine.awaitingGoStop && engine.currentPlayer == 2) {
-      if (engine.calculateScore(2) >= 3) {
+      final aiScore = engine.calculateScore(2);
+      final playerScore = engine.calculateScore(1);
+      
+      // AI의 지능적인 GO/STOP 결정 로직
+      bool shouldGo = _aiDecideGoOrStop(aiScore, playerScore);
+      
+      if (shouldGo) {
+        // AI가 GO를 선택하여 게임을 계속
+        await _showGoAnimation(engine.goCount);
         setState(() => engine.declareGo());
+        // GO 선언 후 AI 턴이 계속되므로 재귀 호출
         await _runAiTurnIfNeeded();
       } else {
+        // AI가 STOP을 선택하여 게임을 종료
         setState(() => engine.declareStop());
-        _showGameOverDialog();
+        await _showGameOverDialog();
       }
-    } else if (engine.currentPhase == TurnPhase.playingCard && engine.currentPlayer == 2) {
-      await _runAiTurnIfNeeded();
     }
+    // AI 턴이 끝나면 onTurnEnd 콜백에서 자동으로 다음 턴 처리됨
   }
 
-  void _showGameOverDialog() {
+  Future<void> _showGameOverDialog() async {
     if (!engine.isGameOver()) return;
-    final result = engine.getResult();
+    
+    // 점수 계산 및 코인 증감 처리 (특수 상황 배수 포함)
+    final player1Score = engine.calculateScoreDetails(1)['totalScore'] as int;
+    final player2Score = engine.calculateScoreDetails(2)['totalScore'] as int;
+    
+    String result;
+    int coinChange = 0;
+    
+    if (player1Score > player2Score) {
+      // 플레이어 1 승리
+      result = AppLocalizations.of(context)!.player1Win + '\n' + AppLocalizations.of(context)!.scoreVs(player1Score, player2Score);
+      coinChange = player1Score; // 승자 점수만큼 코인 획득
+      await CoinService.instance.addCoins(coinChange);
+    } else if (player2Score > player1Score) {
+      // 플레이어 2(AI) 승리
+      result = AppLocalizations.of(context)!.player2Win + '\n' + AppLocalizations.of(context)!.scoreVs(player1Score, player2Score);
+      coinChange = -player2Score; // AI 점수만큼 코인 차감
+      await CoinService.instance.addCoins(coinChange);
+    } else {
+      // 무승부
+      result = AppLocalizations.of(context)!.draw + '\n' + AppLocalizations.of(context)!.scoreVs(player1Score, player2Score);
+      coinChange = 0;
+    }
+    
+    // 코인 증감 결과 메시지 추가
+    String coinMessage = "";
+    if (coinChange > 0) {
+      coinMessage = '\n\n' + AppLocalizations.of(context)!.coinEarned(coinChange);
+    } else if (coinChange < 0) {
+      coinMessage = '\n\n' + AppLocalizations.of(context)!.coinLost(coinChange);
+    }
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: const Text('게임 종료'),
-        content: Text(result),
+        title: Text(AppLocalizations.of(context)!.gameOver),
+        content: Text(result + coinMessage),
         actions: [
           TextButton(
             onPressed: () {
@@ -691,7 +811,15 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
               setState(() => engine.reset());
               _runAiTurnIfNeeded();
             },
-            child: const Text('다시 시작'),
+            child: Text(AppLocalizations.of(context)!.restart),
+          ),
+          TextButton(
+            onPressed: () {
+              // 로비로 이동: 두 번 pop (게임페이지, 다이얼로그)
+              Navigator.of(context).pop(); // 다이얼로그 pop
+              Navigator.of(context, rootNavigator: true).pop(); // 게임페이지 pop
+            },
+            child: Text(AppLocalizations.of(context)!.lobby),
           ),
         ],
       ),
@@ -712,6 +840,89 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   // 안전하게 isAwaitingGoStop 호출
   bool getIsAwaitingGoStop() {
     return engine.awaitingGoStop;
+  }
+
+  // GO 애니메이션 표시
+  Future<void> _showGoAnimation(int goCount) async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.transparent,
+      builder: (context) => GoAnimationWidget(
+        goCount: goCount,
+        onComplete: () {
+          Navigator.of(context).pop();
+        },
+      ),
+    );
+  }
+
+  // GO/STOP 선택 다이얼로그 표시
+  Future<bool?> _showGoStopSelectionDialog() async {
+    final playerScore = engine.calculateScore(1);
+    final aiScore = engine.calculateScore(2);
+    
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => GoSelectionDialog(
+        currentGoCount: engine.goCount,
+        playerScore: playerScore,
+        opponentScore: aiScore,
+        onSelection: (isGo) {
+          Navigator.of(context).pop(isGo);
+        },
+      ),
+    );
+  }
+
+
+
+  // AI의 지능적인 GO/STOP 결정 로직 (실제 프로 플레이어 기준)
+  bool _aiDecideGoOrStop(int aiScore, int playerScore) {
+    // 기본 규칙: 7점 이상일 때만 GO/STOP 선택 가능
+    if (aiScore < 7) {
+      return false; // 7점 미만이면 STOP
+    }
+    
+    // 실제 프로 플레이어의 GO/STOP 결정 로직
+    if (aiScore >= 12) {
+      // 12점 이상: 상대방 점수가 매우 낮을 때만 GO
+      if (playerScore <= 1) {
+        // 상대방이 1점 이하면 GO (상대방이 매우 낮은 점수이므로 더 높은 점수로 승리)
+        return true;
+      } else {
+        // 상대방이 2점 이상이면 STOP (현재 점수로 충분히 승리 가능)
+        return false;
+      }
+    } else if (aiScore >= 10) {
+      // 10-11점: 상대방 점수가 낮을 때만 GO
+      if (playerScore <= 3) {
+        // 상대방이 3점 이하면 GO (상대방이 매우 낮은 점수이므로 더 높은 점수로 승리)
+        return true;
+      } else {
+        // 상대방이 4점 이상이면 STOP (현재 점수로 충분히 승리 가능)
+        return false;
+      }
+    } else if (aiScore >= 8) {
+      // 8-9점: 상대방 점수가 매우 낮을 때만 GO
+      if (playerScore <= 2) {
+        // 상대방이 2점 이하면 GO (상대방이 매우 낮은 점수이므로 더 높은 점수로 승리)
+        return true;
+      } else {
+        // 상대방이 3점 이상이면 STOP (현재 점수로 충분히 승리 가능)
+        return false;
+      }
+    } else {
+      // 7점: 상대방 점수가 매우 낮을 때만 GO
+      if (playerScore <= 1) {
+        // 상대방이 1점 이하면 GO (상대방이 매우 낮은 점수이므로 더 높은 점수로 승리)
+        return true;
+      } else {
+        // 상대방이 2점 이상이면 STOP (현재 점수로 충분히 승리 가능)
+        return false;
+      }
+    }
   }
 
   // AI 카드 이동 애니메이션 (뒤집기 포함)
@@ -741,6 +952,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   void _playCardWithAnimation(GoStopCard card, Offset from, Offset to, VoidCallback onComplete) {
+    SoundManager.instance.play(Sfx.cardPlay);
     setState(() {
       isAnimating = true;
       // 자연스러운 카드 내기 애니메이션 사용
@@ -773,7 +985,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   // 카드 위치 계산 함수 (실제 UI 위치에 맞게 수정)
-  Offset _getCardPosition(String area, GoStopCard card) {
+  Offset _getCardPosition(String area, GoStopCard card, {int? playerId}) {
     final size = MediaQuery.of(context).size;
     Offset position;
     
@@ -791,12 +1003,54 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         position = Offset(size.width / 2 - 24, size.height / 2 - 36);
         break;
       case 'field':
-        // 필드는 실제 월별 그룹 배치 위치로 수정
-        position = _getActualFieldPosition(card);
+        Offset? cardOffset;
+        // 1) 개별 카드 GlobalKey 우선
+        final key = fieldCardKeys[card.id.toString()];
+        if (key is GlobalKey && key.currentContext != null) {
+          final RenderBox box = key.currentContext!.findRenderObject() as RenderBox;
+          cardOffset = box.localToGlobal(Offset.zero);
+        }
+
+        // 2) 월 그룹 placeholder (이전 방식) - 백업용
+        if (cardOffset == null && card.month > 0) {
+          final GlobalKey? groupKey = boardKey.currentState?.getFieldGroupKey(card.month - 1);
+          if (groupKey != null && groupKey.currentContext != null) {
+            final RenderBox box = groupKey.currentContext!.findRenderObject() as RenderBox;
+            cardOffset = box.localToGlobal(Offset.zero);
+          }
+        }
+
+        // 3) 계산식 fallback
+        position = cardOffset ?? _getActualFieldPosition(card);
         break;
       case 'captured':
-        // 획득 카드는 화면 하단 (획득 카드 영역)
-        position = Offset(size.width / 2 - 48, size.height - 120);
+        Offset? capturedOffset;
+        // 플레이어 구분: AI(2)는 AI 획득 영역, 플레이어(1)는 플레이어 획득 영역
+        final GlobalKey? piKey = playerId == 2 
+          ? boardKey.currentState?.getAiCapturedTypeKey('피')
+          : boardKey.currentState?.getCapturedTypeKey('피');
+        if (piKey != null && piKey.currentContext != null) {
+          final RenderBox box = piKey.currentContext!.findRenderObject() as RenderBox;
+          capturedOffset = box.localToGlobal(Offset.zero);
+        }
+        // fallback 위치도 플레이어 구분
+        if (capturedOffset == null) {
+          position = playerId == 2 
+            ? Offset(size.width / 2 - 48, 120) // AI 획득 영역 (상단)
+            : Offset(size.width / 2 - 48, size.height - 120); // 플레이어 획득 영역 (하단)
+        } else {
+          position = capturedOffset;
+        }
+        break;
+      case 'ai_captured':
+        // AI의 먹은 카드 영역 위치 (상단)
+        Offset? aiCapturedOffset;
+        final GlobalKey? aiPiKey = boardKey.currentState?.getAiCapturedTypeKey('피');
+        if (aiPiKey != null && aiPiKey.currentContext != null) {
+          final RenderBox box = aiPiKey.currentContext!.findRenderObject() as RenderBox;
+          aiCapturedOffset = box.localToGlobal(Offset.zero);
+        }
+        position = aiCapturedOffset ?? Offset(size.width / 2 - 48, 120); // AI 획득 영역 (상단)
         break;
       default:
         position = Offset(size.width / 2 - 24, size.height / 2 - 36);
@@ -805,33 +1059,54 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     return position;
   }
   
-  // 필드 카드의 실제 배치 위치 계산 (GoStopBoard Stack 내부 좌표와 100% 일치)
+  // 필드 카드의 실제 배치 위치 계산 (원형 배치에 맞게 수정)
   Offset _getActualFieldPosition(GoStopCard card) {
     if (card.month <= 0) {
       // 월이 없는 카드는 중앙
       final size = MediaQuery.of(context).size;
       return Offset(size.width / 2 - 24, size.height / 2 - 36);
     }
+    
+    final size = MediaQuery.of(context).size;
+    final centerX = size.width / 2;
+    final centerY = size.height / 2;
+    
+    // 원형 배치: 가로와 세로 반지름을 동일하게 설정
+    final radius = (size.width < size.height 
+      ? size.width * 0.35  // 세로가 긴 경우 가로 기준
+      : size.height * 0.35); // 가로가 긴 경우 세로 기준
+    
     final month = card.month - 1; // 0-based index
-    double x = 0, y = 0;
-    if (month < 4) {
-      // 윗 행 4개
-      x = 80 + month * 90;
-      y = 0;
-    } else if (month < 6) {
-      // 왼쪽 2개
-      x = 0;
-      y = 90 + (month - 4) * 90;
-    } else if (month < 8) {
-      // 오른쪽 2개
-      x = 520 - 48;
-      y = 90 + (month - 6) * 90;
-    } else {
-      // 아래 행 4개
-      x = 80 + (month - 8) * 90;
-      y = 360 - 72;
-    }
+    final angle = (month / 12) * 2 * pi - pi / 2; // 12시 방향부터 시작
+    
+    // 원형 배치 좌표 계산
+    final x = centerX + radius * cos(angle) - 24; // 카드 너비의 절반만큼 조정
+    final y = centerY + radius * sin(angle) - 36; // 카드 높이의 절반만큼 조정
+    
     return Offset(x, y);
+  }
+
+  void _ensureBgm() {
+    if (!SoundManager.instance.isBgmPlaying && !SoundManager.instance.isBgmMuted) {
+      SoundManager.instance.playBgm('lobby2', volume: 0.6);
+    }
+  }
+
+  String _buildGameResultText(BuildContext context, int player1Score, int player2Score, int coinChange) {
+    String result;
+    if (player1Score > player2Score) {
+      result = AppLocalizations.of(context)!.player1Win + '\n' + AppLocalizations.of(context)!.scoreVs(player1Score, player2Score);
+    } else if (player2Score > player1Score) {
+      result = AppLocalizations.of(context)!.player2Win + '\n' + AppLocalizations.of(context)!.scoreVs(player1Score, player2Score);
+    } else {
+      result = AppLocalizations.of(context)!.draw + '\n' + AppLocalizations.of(context)!.scoreVs(player1Score, player2Score);
+    }
+    if (coinChange > 0) {
+      result += '\n\n' + AppLocalizations.of(context)!.coinEarned(coinChange);
+    } else if (coinChange < 0) {
+      result += '\n\n' + AppLocalizations.of(context)!.coinLost(coinChange);
+    }
+    return result;
   }
 
   @override
@@ -840,93 +1115,309 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final List<GoStopCard> opponentHand = List<GoStopCard>.from(engine.getHand(2));
     final List<GoStopCard> fieldCards = List<GoStopCard>.from(engine.getField());
     final int drawPileCount = engine.drawPileCount;
-
     // 먹을 수 있는 카드 인덱스 계산
     final fieldMonths = fieldCards.map((c) => c.month).where((m) => m > 0).toSet();
     final highlightHandIndexes = <int>[];
     for (int i = 0; i < playerHand.length; i++) {
       final card = playerHand[i];
-      if (card.isBonus || (card.month > 0 && fieldMonths.contains(card.month))) {
+      // 폭탄카드(폭탄피)는 항상 선택 가능
+      if (card.isBomb) {
+        highlightHandIndexes.add(i);
+        continue;
+      }
+      // 보너스카드(쌍피, 쓰리피 등)는 항상 선택 가능
+      if (card.isBonus) {
+        highlightHandIndexes.add(i);
+        continue;
+      }
+      // 필드에 매치되는 월이 있는 카드만 선택 가능
+      if (card.month > 0 && fieldMonths.contains(card.month)) {
         highlightHandIndexes.add(i);
       }
+      // 그 외(아무것도 매치 안 되는 일반카드)는 선택 불가(어둡게 처리)
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF2f4f2f),
-      body: Stack(
-        children: [
-          // 메인 게임 화면
-          GoStopBoard(
-            key: boardKey,
-            playerHand: playerHand,
-            playerCaptured: groupCapturedByType([...engine.getCaptured(1), ...engine.pendingCaptured.where((c) => c.isBonus && engine.handBonusCard?.id == c.id)]),
-            opponentCaptured: groupCapturedByType(engine.getCaptured(2)),
-            tableCards: fieldCards,
-            drawnCard: '',
-            deckBackImage: 'assets/cards/back.png',
-            opponentName: 'AI',
-            playerScore: engine.calculateScore(1),
-            opponentScore: engine.calculateScore(2),
-            statusLabel: engine.currentPhase.toString(),
-            onCardTap: (index) async {
-              if (index < playerHand.length) {
-                await onCardTap(playerHand[index]);
-              }
-            },
-            effectBanner: null,
-            lastCapturedType: null,
-            lastCapturedIndex: null,
-            opponentHandCount: opponentHand.length,
-            isGoStopPhase: getIsAwaitingGoStop(),
-            playedCard: null,
-            capturedCards: null,
-            onGo: getIsAwaitingGoStop() ? () => setState(() => engine.declareGo()) : null,
-            onStop: getIsAwaitingGoStop()
-              ? () {
+    // 캡처 영역에는 확정된 카드만 보여준다. pendingCaptured는 필드·애니메이션으로만 표현.
+    // 턴 종료 후에만 UI 업데이트하도록 확정된 카드만 사용
+    final playerCapturedCards = engine.getCaptured(1);
+    final opponentCapturedCards = engine.getCaptured(2);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _ensureBgm,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            // 배경 텍스처 + 그라디언트 오버레이
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  image: DecorationImage(
+                    image: AssetImage('assets/backgrounds/pink_glass_cards.png'), // 향후 velvet 이미지로 교체 가능
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.topLeft,
+                    radius: 1.2,
+                    colors: [Colors.transparent, Colors.black54],
+                    stops: [0.0, 1.0],
+                  ),
+                ),
+              ),
+            ),
+            // 메인 게임 화면
+            GoStopBoard(
+              key: boardKey,
+              playerHand: playerHand,
+              playerCaptured: groupCapturedByType(playerCapturedCards),
+              opponentCaptured: groupCapturedByType(opponentCapturedCards),
+              tableCards: fieldCards,
+              drawnCard: '',
+              deckBackImage: 'assets/cards/back.png',
+              opponentName: 'AI',
+              // 턴 종료 후에만 점수 업데이트하도록 확정된 점수만 사용
+              playerScore: engine.getCaptured(1).isEmpty ? 0 : engine.calculateScore(1),
+              opponentScore: engine.getCaptured(2).isEmpty ? 0 : engine.calculateScore(2),
+              statusLabel: engine.currentPhase.toString(),
+              onCardTap: (index) async {
+                if (index < playerHand.length) {
+                  final card = playerHand[index];
+                  // 폭탄피(폭탄카드)는 애니메이션 없이 바로 playCard만 호출
+                  if (card.isBomb) {
+                    setState(() {
+                      engine.playCard(card, groupIndex: null);
+                    });
+                    engine.tapLock = false;
+                    return;
+                  }
+                  await onCardTap(card);
+                }
+              },
+              effectBanner: null,
+              lastCapturedType: null,
+              lastCapturedIndex: null,
+              opponentHandCount: opponentHand.length,
+              isGoStopPhase: getIsAwaitingGoStop(),
+              playedCard: null,
+              capturedCards: null,
+              onGo: getIsAwaitingGoStop() ? () async {
+                // GO/STOP 선택 다이얼로그 표시
+                final isGo = await _showGoStopSelectionDialog();
+                if (isGo == true) {
+                  // GO 애니메이션 먼저 표시 (goCount + 1)
+                  await _showGoAnimation(engine.goCount + 1);
+                  setState(() => engine.declareGo());
+                  // GO 선언 후 AI 턴을 바로 실행 (onTurnEnd 콜백에서 자동으로 처리됨)
+                } else if (isGo == false) {
+                  // STOP 선택 시 게임 종료
                   setState(() => engine.declareStop());
                   _showGameOverDialog();
                 }
-              : null,
-            highlightHandIndexes: highlightHandIndexes,
-            cardStackController: cardDeckController,
-            drawPileCount: drawPileCount,
-            fieldCardKeys: fieldCardKeys,
-            fieldStackKey: fieldStackKey,
-            bonusCard: engine.bonusCard,
-          ),
-          
-          // 활성 애니메이션들을 화면에 표시
-          ...activeAnimations,
-          
-          // 로그 뷰어 버튼
-          Positioned(
-            top: 50,
-            right: 20,
-            child: FloatingActionButton(
-              onPressed: () {
-                setState(() {
-                  showLogViewer = !showLogViewer;
-                });
-              },
-              backgroundColor: Colors.black87,
-              child: Icon(
-                showLogViewer ? Icons.close : Icons.article,
-                color: Colors.white,
-              ),
+              } : null,
+              onStop: null, // onGo에서 통합 처리하므로 null로 설정
+              highlightHandIndexes: highlightHandIndexes,
+              cardStackController: cardDeckController,
+              drawPileCount: drawPileCount,
+              fieldCardKeys: fieldCardKeys,
+              fieldStackKey: fieldStackKey,
+              bonusCard: null,
+              engine: engine,
             ),
-          ),
-          
-          // 로그 뷰어
-          if (showLogViewer)
+            
+            // 활성 애니메이션들을 화면에 표시
+            ...activeAnimations,
+            
+            // 설정 버튼 (좌측 상단)
             Positioned(
-              top: 120,
-              right: 20,
-              child: GameLogViewer(
-                logger: engine.logger,
-                isVisible: showLogViewer,
+              top: MediaQuery.of(context).size.height * 0.018,
+              left: MediaQuery.of(context).size.width * 0.018,
+              child: Builder(
+                builder: (context) {
+                  final minSide = MediaQuery.of(context).size.shortestSide;
+                  final iconSize = minSide * 0.035;
+                  final containerSize = iconSize * 2.0;
+                  final borderRadius = containerSize / 2;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: containerSize,
+                        height: containerSize,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.2),
+                          boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0,2))],
+                        ),
+                        child: IconButton(
+                          icon: Icon(Icons.settings, color: Colors.amberAccent, size: iconSize),
+                          padding: EdgeInsets.all(iconSize * 0.28),
+                          constraints: BoxConstraints(),
+                          onPressed: () {
+                            String selectedLang = Provider.of<LocaleProvider>(context, listen: false).locale.languageCode;
+                            bool isMuted = SoundManager.instance.isBgmMuted;
+                            final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                            final localeProvider = Provider.of<LocaleProvider>(context, listen: false);
+                            showCustomSettingsDialog(
+                              context,
+                              selectedLang: selectedLang,
+                              onLangChanged: (val) {
+                                selectedLang = val;
+                                localeProvider.setLocale(Locale(val));
+                              },
+                              isMuted: isMuted,
+                              onMuteChanged: (val) async {
+                                isMuted = val;
+                                await SoundManager.instance.setBgmMuted(val);
+                                setState(() {});
+                              },
+                              onLogout: () async {
+                                Navigator.of(context).pop();
+                                await authProvider.signOut();
+                                if (mounted) {
+                                  Navigator.of(context).pushReplacementNamed('/login');
+                                }
+                              },
+                            );
+                          },
+                          tooltip: AppLocalizations.of(context)!.settings,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // 뻑 이펙트 테스트 버튼
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        onPressed: () {
+                          setState(() => showPpeokEffect = true);
+                          Future.delayed(const Duration(milliseconds: 1100), () {
+                            if (mounted) setState(() => showPpeokEffect = false);
+                          });
+                        },
+                        child: const Text('Show PPEOK Effect'),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
-        ],
+            // 카드더미 옆에 뻑 이펙트 표시 (테스트용)
+            if (showPpeokEffect)
+              Positioned(
+                // 카드더미는 중앙 기준, 약간 오른쪽에 띄움 (반응형)
+                left: MediaQuery.of(context).size.width / 2 + 80,
+                top: MediaQuery.of(context).size.height / 2 - 36,
+                child: IgnorePointer(
+                  child: SpecialEffectAnimation(
+                    effectType: 'ppeok',
+                    onComplete: () {}, // 자동 사라짐
+                  ),
+                ),
+              ),
+            
+            // AI 실시간 점수표 (턴 종료 후에만 업데이트)
+            // Positioned(
+            //   top: 50,
+            //   left: 20,
+            //   child: ScoreBoard(
+            //     scoreDetails: engine.getCaptured(2).isEmpty ? 
+            //       {'totalScore': 0, 'baseScore': 0, 'gwangScore': 0, 'ttiScore': 0, 'piScore': 0, 'animalScore': 0, 'godoriScore': 0, 'danScore': 0, 'goBonus': 0, 'gwangCards': [], 'ttiCards': [], 'piCards': [], 'animalCards': [], 'totalPi': 0} : 
+            //       engine.calculateScoreDetails(2),
+            //     playerName: 'AI',
+            //     isAI: true,
+            //     isPiBak: engine.piBakPlayers.contains(2),
+            //     isGwangBak: engine.gwangBakPlayers.contains(2),
+            //   ),
+            // ),
+
+            // 흔들 상태 표시
+            if (engine.heundalPlayers.isNotEmpty)
+              Positioned(
+                top: 50,
+                right: 20,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange, width: 2),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.whatshot, color: Colors.white, size: 20),
+                      const SizedBox(width: 5),
+                      Text(
+                        AppLocalizations.of(context)!.heundalStatus,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // 폭탄 상태 표시 - 제거: 플레이어 박스 내부에 이미 표시되므로 중복 방지
+            // if (engine.bombPlayers.isNotEmpty)
+            //   Positioned(
+            //     top: 50,
+            //     right: engine.heundalPlayers.isNotEmpty ? 120 : 20,
+            //     child: Container(
+            //       padding: const EdgeInsets.all(8),
+            //       decoration: BoxDecoration(
+            //         color: Colors.purple.withOpacity(0.9),
+            //         borderRadius: BorderRadius.circular(8),
+            //         border: Border.all(color: Colors.purple, width: 2),
+            //       ),
+            //       child: Row(
+            //         mainAxisSize: MainAxisSize.min,
+            //         children: [
+            //           const Icon(Icons.local_fire_department, color: Colors.white, size: 20),
+            //           const SizedBox(width: 5),
+            //           Text(
+            //             AppLocalizations.of(context)!.bombStatus,
+            //             style: const TextStyle(
+            //               color: Colors.white,
+            //               fontSize: 16,
+            //               fontWeight: FontWeight.bold,
+            //             ),
+            //           ),
+            //         ],
+            //       ),
+            //     ),
+            //   ),
+            
+            // 플레이어 실시간 점수표 (턴 종료 후에만 업데이트)
+            // Positioned(
+            //   bottom: 180,
+            //   left: 20,
+            //   child: ScoreBoard(
+            //     scoreDetails: engine.getCaptured(1).isEmpty ? 
+            //       {'totalScore': 0, 'baseScore': 0, 'gwangScore': 0, 'ttiScore': 0, 'piScore': 0, 'animalScore': 0, 'godoriScore': 0, 'danScore': 0, 'goBonus': 0, 'gwangCards': [], 'ttiCards': [], 'piCards': [], 'animalCards': [], 'totalPi': 0} : 
+            //       engine.calculateScoreDetails(1),
+            //     playerName: '나',
+            //     isAI: false,
+            //     isPiBak: engine.piBakPlayers.contains(1),
+            //     isGwangBak: engine.gwangBakPlayers.contains(1),
+            //   ),
+            // ),
+          ],
+        ),
       ),
     );
   }
