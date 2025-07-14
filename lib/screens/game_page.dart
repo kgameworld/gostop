@@ -43,6 +43,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   // 애니메이션 상태 관리
   List<Widget> activeAnimations = [];
   bool isAnimating = false;
+  // 최근 플레이된 카드 위치(id -> Offset). 필드에 Key가 아직 없을 때 사용
+  final Map<int, Offset> _recentCardPositions = {};
   
   // 애니메이션 풀
   final AnimationPool animationPool = AnimationPool();
@@ -72,7 +74,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     engine = MatgoEngine(deckManager);
     
     // 애니메이션 이벤트 리스너 설정
-    // engine.setAnimationListener(_handleAnimationEvent);
+    engine.setAnimationListener(_handleAnimationEvent);
     
     // 턴 종료 후 UI 업데이트 콜백 설정
     engine.onTurnEnd = () {
@@ -133,28 +135,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         }
         break;
       case AnimationEventType.cardCapture:
-        // 먹은 카드들 먹은 카드 영역으로 이동
+        // 카드들을 순서대로 획득 영역으로 이동하는 애니메이션
         final cards = event.data['cards'] as List<GoStopCard>;
         final player = event.data['player'] as int;
-        final fromOffset = _getCardPosition('field', cards.first);
-        final toOffset = _getCardPosition('captured', cards.first, playerId: player);
-        setState(() {
-          isAnimating = true;
-          activeAnimations.add(
-            CardCaptureAnimation(
-              cardImages: cards.map((c) => c.imageUrl).toList(),
-              startPosition: fromOffset,
-              endPosition: toOffset,
-              onComplete: () {
-                setState(() {
-                  activeAnimations.removeWhere((anim) => anim is CardCaptureAnimation);
-                  if (activeAnimations.isEmpty) isAnimating = false;
-                });
-              },
-              duration: const Duration(milliseconds: 600),
-            ),
-          );
-        });
+        _playCardCaptureAnimation(cards, player);
         break;
       case AnimationEventType.specialEffect:
       case AnimationEventType.ppeok:
@@ -164,29 +148,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         _handleSpecialEffect(event.data);
         break;
       case AnimationEventType.bonusCard:
-        final card = event.data['card'] as GoStopCard;
-        final player = event.data['player'] as int;
-        // 카드더미에서 뒤집힌 보너스카드 애니메이션 (플레이어/AI 공통)
-        final fromOffset = _getCardPosition('deck', card);
-        // 잠시 필드 겹침 위치로 이동 후, _endTurn 에서 캡처 애니메이션이 다시 실행됨
-        final toOffset = _getCardPosition('field', card);
-        setState(() {
-          isAnimating = true;
-          activeAnimations.add(
-            CardCaptureAnimation(
-              cardImages: [card.imageUrl],
-              startPosition: fromOffset,
-              endPosition: toOffset,
-              onComplete: () {
-                setState(() {
-                  activeAnimations.removeWhere((anim) => anim is CardCaptureAnimation);
-                  if (activeAnimations.isEmpty) isAnimating = false;
-                });
-              },
-              duration: const Duration(milliseconds: 600),
-            ),
-          );
-        });
+        // 보너스카드 애니메이션 제거 - 즉시 처리
         break;
     }
   }
@@ -215,39 +177,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   void _handleSpecialEffect(Map<String, dynamic> data) {
-    final effect = data['effect'] as String;
-    final player = data['player'] as int;
-    
-    setState(() {
-      isAnimating = true;
-      
-      // 특수 효과 애니메이션
-      activeAnimations.add(
-        animationPool.getSpecialEffectAnimation(
-          effectType: effect,
-          onComplete: () {
-            setState(() {
-              activeAnimations.removeWhere((anim) => anim is SpecialEffectAnimation);
-            });
-          },
-        ),
-      );
-      
-      // 화면 파티클 효과
-      activeAnimations.add(
-        animationPool.getScreenParticleEffect(
-          effectType: effect,
-          onComplete: () {
-            setState(() {
-              activeAnimations.removeWhere((anim) => anim is ScreenParticleEffect);
-              if (activeAnimations.isEmpty) {
-                isAnimating = false;
-              }
-            });
-          },
-        ),
-      );
-    });
+    // 특수 효과 애니메이션/이펙트 비활성화
+    return;
   }
 
   // 긴장감 모드 시작
@@ -376,15 +307,37 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         if (key is GlobalKey && key.currentContext != null) {
           final RenderBox cardBox = key.currentContext!.findRenderObject() as RenderBox;
           final baseOffset = cardBox.localToGlobal(Offset.zero);
-          // 매치가 있으면 겹침 위치로, 없으면 원래 위치로 (애니메이션과 겹침 통합)
-          const double cardWidth = 48.0;
-          const double cardHeight = 72.0;
-          const double overlapOffsetX = cardWidth * 0.3; // 카드 너비의 30% 겹침
-          const double overlapOffsetY = cardHeight * 0.1; // 카드 높이의 10% 겹침
-          destinationOffset = Offset(
-            baseOffset.dx + overlapOffsetX,
-            baseOffset.dy + overlapOffsetY,
-          );
+          // 캡처 애니메이션을 위해 기존 필드 카드 위치 캐시
+          _recentCardPositions[matchCard.id] = baseOffset;
+          // ========= 보드의 카드 크기 / 겹침 오프셋과 동일 공식 =========
+          final Size screenSize = MediaQuery.of(context).size;
+          final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
+          final double handCardWidth = minSide * 0.13;
+          final double fieldCardWidth = handCardWidth * 0.8;
+          final double fieldCardHeight = fieldCardWidth * 1.5;
+          final double overlapOffsetX = fieldCardWidth * 0.375; // 보드와 동일 비율
+          final double overlapOffsetY = fieldCardHeight * 0.111;
+
+          // 같은 월 카드들 중 현재 필드에서 가장 위(=가장 겹침이 많이 된) 카드의 위치를 찾는다.
+          Offset topMostOffset = baseOffset;
+          int maxLayer = -1;
+          for (final fc in engine.getField()) {
+            if (fc.month != card.month || fc.isBonus) continue;
+            final GlobalKey? fk = fieldCardKeys[fc.id.toString()] as GlobalKey?;
+            if (fk != null && fk.currentContext != null) {
+              final RenderBox fb = fk.currentContext!.findRenderObject() as RenderBox;
+              final Offset off = fb.localToGlobal(Offset.zero);
+              // 레이어는 x(또는 y) 증가량 / overlap 으로 계산 가능
+              final int layer = ((off.dx - baseOffset.dx) / overlapOffsetX).round();
+              if (layer > maxLayer) {
+                maxLayer = layer;
+                topMostOffset = off;
+              }
+            }
+          }
+
+          // 새 카드는 topMostOffset 바로 위 레이어에 놓인다.
+          destinationOffset = topMostOffset.translate(overlapOffsetX, overlapOffsetY);
         } else {
           destinationOffset = _getCardPosition('field', card);
         }
@@ -392,6 +345,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         destinationOffset = _getCardPosition('field', card);
       }
     }
+
+    // 매치 애니메이션에서 정확한 시작 좌표를 위해 미리 저장
+    _recentCardPositions[card.id] = destinationOffset;
 
     final completer = Completer<void>();
     _playCardWithAnimation(card, fromOffset, destinationOffset, () async {
@@ -443,15 +399,58 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         deckOffset = box.localToGlobal(Offset.zero);
       }
       
-      // 필드 도착 위치 계산 (GlobalKey 사용 - 하나의 기준 좌표계)
+      // 필드 도착 위치 계산 (겹침 스택 고려)
       Offset? fieldOffset;
+
       if (drawnCard.month > 0 && drawnCard.month <= 12) {
-        final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
-        if (groupKeys != null && drawnCard.month - 1 < groupKeys.length) {
-          final groupKey = groupKeys[drawnCard.month - 1];
-          if (groupKey is GlobalKey && groupKey.currentContext != null) {
-            final RenderBox groupBox = groupKey.currentContext!.findRenderObject() as RenderBox;
-            fieldOffset = groupBox.localToGlobal(Offset.zero);
+        // 1) 이미 같은 월 카드가 있는 경우 → 최상위 카드 계산
+        final List<GoStopCard> sameMonth = engine.getField()
+            .where((c) => c.month == drawnCard.month && !c.isBonus)
+            .toList();
+
+        if (sameMonth.isNotEmpty) {
+          // 기준이 될 첫 번째 카드의 baseOffset
+          final firstKey = fieldCardKeys[sameMonth.first.id.toString()];
+          if (firstKey is GlobalKey && firstKey.currentContext != null) {
+            final RenderBox baseBox = firstKey.currentContext!.findRenderObject() as RenderBox;
+            final Offset baseOffset = baseBox.localToGlobal(Offset.zero);
+
+            // 화면 크기 기반 카드/겹침 크기 계산 (보드와 동일)
+            final Size scr = MediaQuery.of(context).size;
+            final double minSide = scr.width < scr.height ? scr.width : scr.height;
+            final double handW = minSide * 0.13;
+            final double fieldW = handW * 0.8;
+            final double fieldH = fieldW * 1.5;
+            final double oX = fieldW * 0.375;
+            final double oY = fieldH * 0.111;
+
+            // 최상위 레이어 탐색
+            Offset topOffset = baseOffset;
+            int topLayer = -1;
+            for (final fc in sameMonth) {
+              final key = fieldCardKeys[fc.id.toString()];
+              if (key is GlobalKey && key.currentContext != null) {
+                final RenderBox bx = key.currentContext!.findRenderObject() as RenderBox;
+                final Offset off = bx.localToGlobal(Offset.zero);
+                final int layer = ((off.dx - baseOffset.dx) / oX).round();
+                if (layer > topLayer) {
+                  topLayer = layer;
+                  topOffset = off;
+                }
+              }
+            }
+
+            fieldOffset = topOffset.translate(oX, oY);
+          }
+        } else {
+          // 2) 같은 월 카드 없음 → 빈 그룹 위치 사용
+          final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
+          if (groupKeys != null && drawnCard.month - 1 < groupKeys.length) {
+            final groupKey = groupKeys[drawnCard.month - 1];
+            if (groupKey is GlobalKey && groupKey.currentContext != null) {
+              final RenderBox groupBox = groupKey.currentContext!.findRenderObject() as RenderBox;
+              fieldOffset = groupBox.localToGlobal(Offset.zero);
+            }
           }
         }
       }
@@ -477,6 +476,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                   isAnimating = false;
                 }
               });
+              // 애니메이션 완료 시 필드에 놓인 카드 좌표를 cache (GlobalKey가 아직 없을 수 있음)
+              _recentCardPositions[drawnCard.id] = fieldOffset!;
               completer.complete();
             },
             duration: const Duration(milliseconds: 900),
@@ -828,13 +829,21 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
   // 획득한 카드를 UI에 표시하기 위해 타입별로 그룹화하는 헬퍼 함수
   Map<String, List<String>> groupCapturedByType(List<dynamic> cards) {
-    final Map<String, List<String>> grouped = {};
+    // 항상 모든 그룹이 존재하도록 초기화
+    final Map<String, List<String>> grouped = {
+      '광': [],
+      '띠': [],
+      '동물': [],
+      '피': [],
+    };
     for (final card in cards) {
-      final type = card.type ?? '기타';
-      grouped.putIfAbsent(type, () => <String>[]);
-      grouped[type]!.add(card.imageUrl.toString());
+      // '끗' 타입도 '동물'로 매핑
+      final type = (card.type == '끗') ? '동물' : (card.type ?? '기타');
+      if (grouped.containsKey(type)) {
+        grouped[type]!.add(card.imageUrl.toString());
+      }
     }
-    return grouped.map((k, v) => MapEntry(k, v.map((e) => e.toString()).toList()));
+    return grouped;
   }
 
   // 안전하게 isAwaitingGoStop 호출
@@ -984,6 +993,117 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     _playCardWithAnimation(card, fromOffset, toOffset, onComplete);
   }
 
+  // 카드들을 순서대로 획득 영역으로 이동하는 애니메이션
+  void _playCardCaptureAnimation(List<GoStopCard> cards, int player) async {
+    // 카드 우선순위: 광 > 띠 > 동물 > 피 순서로 정렬
+    cards.sort((a, b) {
+      final priorityA = _getCardPriority(a);
+      final priorityB = _getCardPriority(b);
+      return priorityA.compareTo(priorityB);
+    });
+
+    final playerIdx = player - 1;
+
+    // 각 카드를 순서대로 애니메이션 실행
+    for (int i = 0; i < cards.length; i++) {
+      final card = cards[i];
+      final fromOffset = _getCardPosition('field', card);
+      // 캡처 그룹 레이아웃이 아직 준비되지 않은 경우 fallback 좌표(화면 중앙 하단)가 반환될 수 있음
+      // 이런 경우 한 프레임 뒤에 다시 계산하여 실제 캡처 영역 좌표를 사용하도록 보정한다.
+      Size _screenSize = MediaQuery.of(context).size;
+      Offset toOffset = _getCardPosition('captured', card, playerId: player);
+
+      bool _isFallbackOffset(Offset o) {
+        // player 1(하단) fallback: 화면 하단 중앙 근처, player 2(상단) fallback: 화면 상단 중앙 근처
+        if (player == 1) {
+          return (o.dx - (_screenSize.width / 2 - 48)).abs() < 2 &&
+                 (o.dy - (_screenSize.height - 120)).abs() < 2;
+        } else {
+          return (o.dx - (_screenSize.width / 2 - 48)).abs() < 2 &&
+                 (o.dy - 120).abs() < 2;
+        }
+      }
+
+      if (_isFallbackOffset(toOffset)) {
+        // 한 프레임 대기 후 재계산 (레이아웃 완료 대기)
+        await Future.delayed(const Duration(milliseconds: 16));
+        toOffset = _getCardPosition('captured', card, playerId: player);
+      }
+
+      // 획득 카드 영역의 카드 크기 계산 (capturedOverlapRow와 동일 공식)
+      final screenSize = MediaQuery.of(context).size;
+      final minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
+      final capturedCardWidth = minSide * 0.0455;
+      final capturedCardHeight = capturedCardWidth * 1.5;
+      
+      // 각 카드마다 200ms 간격으로 애니메이션 실행
+      if (i > 0) {
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      
+      // 원본 필드 카드 즉시 제거 + 애니메이션 위젯 추가를 한 번의 setState로 통합
+      setState(() {
+        engine.deckManager.fieldCards.removeWhere((c) => c.id == card.id);
+        isAnimating = true;
+
+        // 고유 키로 애니메이션 위젯 식별
+        final uniqKey = UniqueKey();
+
+        final anim = SimpleCardMoveAnimation(
+          cardImage: card.imageUrl,
+          startPosition: fromOffset,
+          endPosition: toOffset,
+          cardWidth: capturedCardWidth,
+          cardHeight: capturedCardHeight,
+          onComplete: () {
+            // 애니메이션 완료 시 해당 카드만 즉시 획득 리스트에 추가 (불변 리스트 갱신)
+            final current = engine.deckManager.capturedCards[playerIdx] ?? [];
+            engine.deckManager.capturedCards[playerIdx] = List<GoStopCard>.from(current)..add(card);
+
+            // pendingCaptured 리스트 정리
+            engine.pendingCaptured.removeWhere((c) => c.id == card.id);
+
+            // 자신(Key)만 제거하여 다른 애니메이션에 영향 없도록 함
+            setState(() {
+              activeAnimations.removeWhere((w) => w.key == uniqKey);
+              if (activeAnimations.isEmpty) isAnimating = false;
+            });
+          },
+          duration: const Duration(milliseconds: 500),
+        );
+
+        // KeyedSubtree로 감싸서 List<Widget>에서도 고유 식별 가능
+        activeAnimations.add(KeyedSubtree(key: uniqKey, child: anim));
+      });
+    }
+    // 모든 애니메이션이 끝난 후 별도의 _moveCardsToCaptured 호출은 필요 없음
+  }
+
+  // 카드 우선순위 계산 (광 > 띠 > 동물 > 피)
+  int _getCardPriority(GoStopCard card) {
+    if (card.type == '광') return 0;
+    if (card.type == '띠') return 1;
+    if (card.type == '동물') return 2;
+    if (card.type == '피') return 3;
+    return 4;
+  }
+
+  // 애니메이션 완료 후 실제 카드 데이터를 획득 영역으로 이동
+  void _moveCardsToCaptured(List<GoStopCard> cards, int player) {
+    final playerIdx = player - 1;
+    
+    // 애니메이션에 전달된 카드들을 획득 카드로 이동
+    engine.deckManager.capturedCards[playerIdx]?.addAll(cards);
+    // 필드에서 획득 카드 제거
+    engine.deckManager.fieldCards.removeWhere((c) => cards.any((rc) => rc.id == c.id));
+    
+    // pendingCaptured에서도 해당 카드들 제거
+    engine.pendingCaptured.removeWhere((c) => cards.any((rc) => rc.id == c.id));
+    
+    // UI 업데이트
+    setState(() {});
+  }
+
   // 카드 위치 계산 함수 (실제 UI 위치에 맞게 수정)
   Offset _getCardPosition(String area, GoStopCard card, {int? playerId}) {
     final size = MediaQuery.of(context).size;
@@ -991,8 +1111,15 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     
     switch (area) {
       case 'hand':
-        // 플레이어 손패는 화면 하단 중앙
-        position = Offset(size.width / 2 - 48, size.height - 200);
+        Offset? handOffset;
+        // GoStopBoard에서 손패 카드 GlobalKey 가져오기
+        final GlobalKey? handKey = boardKey.currentState?.getHandCardKeyById(card.id.toString());
+        if (handKey != null && handKey.currentContext != null) {
+          final RenderBox box = handKey.currentContext!.findRenderObject() as RenderBox;
+          handOffset = box.localToGlobal(Offset.zero);
+        }
+        // fallback: 화면 하단 중앙 근사값
+        position = handOffset ?? Offset(size.width / 2 - 48, size.height - 200);
         break;
       case 'ai_hand':
         // AI 손패는 화면 상단 중앙
@@ -1020,27 +1147,48 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           }
         }
 
-        // 3) 계산식 fallback
+        // 3) recentCardPositions에 저장된 좌표 사용 (필드 키가 아직 없을 경우)
+        if (cardOffset == null) {
+          cardOffset = _recentCardPositions[card.id];
+        }
+
+        // 4) 계산식 fallback
         position = cardOffset ?? _getActualFieldPosition(card);
         break;
       case 'captured':
-        Offset? capturedOffset;
-        // 플레이어 구분: AI(2)는 AI 획득 영역, 플레이어(1)는 플레이어 획득 영역
-        final GlobalKey? piKey = playerId == 2 
-          ? boardKey.currentState?.getAiCapturedTypeKey('피')
-          : boardKey.currentState?.getCapturedTypeKey('피');
-        if (piKey != null && piKey.currentContext != null) {
-          final RenderBox box = piKey.currentContext!.findRenderObject() as RenderBox;
-          capturedOffset = box.localToGlobal(Offset.zero);
+        // 카드 타입별 그룹 Key 결정
+        String groupType = card.type;
+        if (groupType == '끗') groupType = '동물';
+
+        Offset? groupOffset;
+        final GlobalKey? groupKey = playerId == 2
+            ? boardKey.currentState?.getAiCapturedTypeKey(groupType)
+            : boardKey.currentState?.getCapturedTypeKey(groupType);
+
+        if (groupKey != null && groupKey.currentContext != null) {
+          final RenderBox box = groupKey.currentContext!.findRenderObject() as RenderBox;
+          groupOffset = box.localToGlobal(Offset.zero);
         }
-        // fallback 위치도 플레이어 구분
-        if (capturedOffset == null) {
-          position = playerId == 2 
-            ? Offset(size.width / 2 - 48, 120) // AI 획득 영역 (상단)
-            : Offset(size.width / 2 - 48, size.height - 120); // 플레이어 획득 영역 (하단)
-        } else {
-          position = capturedOffset;
+
+        // fallback 위치도 플레이어 구분 (대략적인 위치)
+        position = groupOffset ?? (playerId == 2
+            ? Offset(size.width / 2 - 48, 120)
+            : Offset(size.width / 2 - 48, size.height - 120));
+
+        // ── 겹침 offset 보정(이미 보유한 카드 수 만큼 오른쪽으로 이동) ──
+        final capturedList = engine.deckManager.capturedCards[(playerId ?? 1) - 1] ?? [];
+        final grouped = groupCapturedByType(capturedList);
+        int idxInGroup = 0;
+        if (grouped.containsKey(groupType)) {
+          idxInGroup = grouped[groupType]!.length; // 현재 보유 수 (새 카드 index)
         }
+
+        // 카드 폭, overlapX 계산 캡처된 카드 UI와 동일 공식
+        final minSide = size.width < size.height ? size.width : size.height;
+        final cWidth = minSide * 0.0455;
+        final overlapX = cWidth * 0.45;
+
+        position = position.translate(idxInGroup * overlapX, 0);
         break;
       case 'ai_captured':
         // AI의 먹은 카드 영역 위치 (상단)
