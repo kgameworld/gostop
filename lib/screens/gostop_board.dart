@@ -1393,8 +1393,10 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     final bool isAiGwangBak = engine?.gwangBakPlayers?.contains(aiPlayerNum) ?? false;
     final bool isMeMeongtta = engine?.mungBakPlayers?.contains(myPlayerNum) ?? false;
     final bool isAiMeongtta = engine?.mungBakPlayers?.contains(aiPlayerNum) ?? false;
-    final int meGoCount = engine?.goCount ?? 0;
-    final int aiGoCount = 0; // AI의 goCount는 별도 관리 필요시 수정
+    // ── GO 횟수 표시 ──
+    // goPlayer가 어느 쪽인지에 따라 해당 박스에만 표시하고, 다른 쪽은 0으로
+    final int meGoCount = (engine != null && engine.goPlayer == myPlayerNum) ? engine.goCount : 0;
+    final int aiGoCount = (engine != null && engine.goPlayer == aiPlayerNum) ? engine.goCount : 0;
 
     // 오른쪽에 위치해도 항상 크기를 제대로 할당받도록 SizedBox.expand로 감쌈
     return SizedBox.expand(

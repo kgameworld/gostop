@@ -83,17 +83,11 @@ class MatgoEngine {
 
   // 애니메이션 이벤트 발생
   void _triggerAnimation(AnimationEventType type, Map<String, dynamic> data) {
-    // 특수 효과(따닥, 쪽, 폭탄, 쓸, 뻑, 족보 등) 애니메이션/이펙트 비활성화
-    if (type == AnimationEventType.specialEffect ||
-        type == AnimationEventType.ppeok ||
-        type == AnimationEventType.sseul ||
-        type == AnimationEventType.bomb) {
-      // 효과 비활성화: 아무 동작도 하지 않음
-      return;
-    }
+    // cardMove 사운드는 유지
     if (type == AnimationEventType.cardMove) {
       SoundManager.instance.play(Sfx.cardOverlap);
     }
+    // 이벤트 전달
     onAnimationEvent?.call(AnimationEvent(type, data));
   }
 
@@ -419,6 +413,7 @@ class MatgoEngine {
       _triggerAnimation(AnimationEventType.specialEffect, {
         'effect': 'bomb',
         'player': currentPlayer,
+        'anchorCard': card,
       });
       
       // 폭탄 플레이어 표시
@@ -611,7 +606,7 @@ class MatgoEngine {
 
   // 역GO(Go Bust) 체크
   void checkReverseGo() {
-    if (goCount > 0 && currentPlayer != goPlayer && calculateScore(currentPlayer) >= 7) {
+    if (goCount > 0 && currentPlayer != goPlayer && calculateBaseScore(currentPlayer) >= 7) {
       // 역GO: 상대방이 GO 상태에서 현재 플레이어가 7점 달성
       // 박 판정은 GO/STOP 선택 후에 처리되므로 여기서는 즉시 승리 처리
       winner = 'player$currentPlayer';
@@ -653,6 +648,13 @@ class MatgoEngine {
     }, currentPlayer, 'flippingCard');
     checkReverseGo();
     _endTurn();
+    
+    // 뻑 완성 이펙트 트리거 (anchorCard: drawnCard)
+    _triggerAnimation(AnimationEventType.specialEffect, {
+      'effect': 'ppeokFinish',
+      'player': currentPlayer,
+      'anchorCard': drawnCard,
+    });
   }
 
   void handleChok(GoStopCard drawnCard) {
@@ -670,10 +672,11 @@ class MatgoEngine {
     }
     deckManager.fieldCards.removeWhere((c) => c.id == playedCard!.id);
     
-    // 쪽 애니메이션 트리거
+    // 쪽 애니메이션 트리거 (anchorCard: drawnCard)
     _triggerAnimation(AnimationEventType.specialEffect, {
       'effect': 'chok',
       'player': currentPlayer,
+      'anchorCard': drawnCard,
     });
     
     // 쪽 매치 사운드 재생 (즉시)
@@ -702,10 +705,11 @@ class MatgoEngine {
     deckManager.fieldCards.addAll(allPpeokCards);
     ppeokMonth = drawnCard.month;
     
-    // 뻑 발생 애니메이션 트리거
+    // 뻑 발생 애니메이션 트리거 (anchorCard: drawnCard)
     _triggerAnimation(AnimationEventType.specialEffect, {
       'effect': 'ppeok',
       'player': currentPlayer,
+      'anchorCard': drawnCard,
     });
     
     logger.logActualProcessing('뻑 상태 설정 (필드에 4장 유지)', {
@@ -734,6 +738,13 @@ class MatgoEngine {
       }
     }
     deckManager.fieldCards.add(drawnCard);
+    
+    // 따닥 이펙트 트리거 (anchorCard: drawnCard)
+    _triggerAnimation(AnimationEventType.specialEffect, {
+      'effect': 'ttak',
+      'player': currentPlayer,
+      'anchorCard': drawnCard,
+    });
     
     _stealOpponentPi(currentPlayer - 1);
     checkReverseGo();
@@ -1003,12 +1014,12 @@ class MatgoEngine {
   }
   
   bool _checkVictoryCondition() {
-    final score = calculateScore(currentPlayer);
+    final score = calculateBaseScore(currentPlayer);
     
     // 3. goCount > 0 상태에서 상대가 7점↑ 달성(역GO) ⇒ winner = opponent ; gameOver = true ; GO/STOP 배수는 무시한다.
     if (goCount > 0) {
       final opponent = (currentPlayer % 2) + 1;
-      final opponentScore = calculateScore(opponent);
+      final opponentScore = calculateBaseScore(opponent);
       if (opponentScore >= 7) {
         // 역GO: 상대방이 승리 (박 판정은 GO/STOP 선택 후에 처리)
         winner = 'player$opponent';
@@ -1341,194 +1352,19 @@ class MatgoEngine {
     };
   }
 
+  int calculateBaseScore(int playerNum) {
+    final details = calculateScoreDetails(playerNum);
+    return (details['baseScore'] ?? 0) as int;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 최종 점수(배수 포함) 계산 - 기존 로직 복원
+  // ─────────────────────────────────────────────────────────────
   int calculateScore(int playerNum) {
-    // ── 실시간 박 상태 체크 (점수 계산 전에 박 상태 최신화) ──
-    // 무한 루프 방지를 위해 박 상태 체크는 한 번만 실행
-    checkBakConditions();
-    
-    // 현재 플레이어의 pendingCaptured만 포함 (무한 루프 방지)
-    final captured = [...getCaptured(playerNum)];
-    if (playerNum == currentPlayer && pendingCaptured.isNotEmpty) {
-      captured.addAll(pendingCaptured);
-    }
-    
-    logger.logScoreCalculation(captured, goCount, playerNum);
-    
-    if (captured.isEmpty) {
-      logger.addLog(playerNum, 'turnEnd', LogLevel.info, 
-        '점수 계산: 획득 카드 없음 → 0점'
-      );
-      return 0;
-    }
-
-    // ① 기본점수(base) 계산
-    int baseScore = 0;
-    
-    // 광 점수 계산
-    final gwangCards = captured.where((c) => c.type == '광').toList();
-    final hasRainGwang = gwangCards.any((c) => c.month == 12); // 비광(12월 광) 포함 여부
-    if (gwangCards.length == 3) {
-      if (hasRainGwang) {
-        baseScore += 2; // 비광 포함 3광
-      } else {
-        baseScore += 3; // 비광 없는 3광
-      }
-    } else if (gwangCards.length == 4) {
-      baseScore += 4;
-    } else if (gwangCards.length >= 5) {
-      baseScore += 15;
-    }
-    
-    // 띠 점수 계산
-    final ttiCards = captured.where((c) => c.type == '띠').toList();
-    if (ttiCards.length >= 5) {
-      baseScore += ttiCards.length - 4; // 5띠=1점, 6띠=2점, 7띠=3점
-    }
-    
-    // 고도리 (새 동물 3종: 2,4,8월 동물)
-    final godoriMonths = {2, 4, 8};
-    final godoriHas = godoriMonths.every((m) => captured.any((c) => c.type == '동물' && c.month == m));
-    if (godoriHas) {
-      baseScore += 5;
-    }
-
-    // 단(청단/홍단/초단) 세트 점수 계산
-    const hongdanMonths = {1, 2, 3};
-    const chungdanMonths = {6, 9, 10};
-    const chodanMonths = {4, 5, 7};
-    if (hongdanMonths.every((m) => captured.any((c) => c.type == '띠' && c.month == m))) {
-      baseScore += 3;
-    }
-    if (chungdanMonths.every((m) => captured.any((c) => c.type == '띠' && c.month == m))) {
-      baseScore += 3;
-    }
-    if (chodanMonths.every((m) => captured.any((c) => c.type == '띠' && c.month == m))) {
-      baseScore += 3;
-    }
-
-    // 피 점수 계산 (총 피 점수: 일반피=1, 쌍피/보너스쌍피=2, 쓰리피/보너스쓰리피=3)
-    final piCards = captured.where((c) => c.type == '피').toList();
-int totalPiScore = 0;
-int piScore = 0;
-for (final c in piCards) {
-  final img = c.imageUrl;
-  if (img.contains('bonus_3pi') || (c.isBonus && img.contains('3pi'))) {
-    totalPiScore += 3; // 보너스 쓰리피
-  } else if (img.contains('bonus_ssangpi') || (c.isBonus && img.contains('ssangpi'))) {
-    totalPiScore += 2; // 보너스 쌍피
-  } else if (img.contains('3pi')) {
-    totalPiScore += 3; // 쓰리피
-  } else if (img.contains('ssangpi')) {
-    totalPiScore += 2; // 쌍피
-  } else {
-    totalPiScore += 1; // 일반피
+    final details = calculateScoreDetails(playerNum);
+    return (details['totalScore'] ?? 0) as int;
   }
-}
-if (totalPiScore >= 10) {
-  piScore = totalPiScore - 9;
-}
-baseScore += piScore; 
 
-    // 동물(열끗) 점수: 5장부터 1점, 이후 1장마다 +1
-    int animalScore = 0;
-    final animalCards = captured.where((c) => c.type == '동물' || c.type == '오').toList();
-    if (animalCards.length >= 5) {
-      animalScore = animalCards.length - 4;
-      baseScore += animalScore;
-    }
-
-    // ② GO 가산점(+1/+2) 추가
-    int goBonus = 0;
-    int score = baseScore;
-    if (goCount == 1) {
-      goBonus = 1;
-      score += goBonus;
-    } else if (goCount == 2) {
-      goBonus = 2;
-      score += goBonus;
-    }
-
-    // ③ 3GO 이상 ⇒ GO 배수
-    if (goCount >= 3) {
-      goBonus = (baseScore + 2) * (1 << (goCount - 2)) - baseScore;
-      score = (baseScore + 2) * (1 << (goCount - 2));
-    }
-
-    // ④ 흔들·폭탄 배수 (중첩 가능)
-    if (heundalPlayers.contains(playerNum)) {
-      score *= 2;
-      logger.addLog(playerNum, 'turnEnd', LogLevel.info, 
-        '흔들 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
-      );
-    }
-    if (bombPlayers.contains(playerNum)) score *= 2;
-    
-    // ⑤ 나가리 배수 적용
-    if (nagariCount > 0) {
-      final nagariMultiplier = 1 << nagariCount;
-      score *= nagariMultiplier;
-      logger.addLog(playerNum, 'turnEnd', LogLevel.info, 
-        '나가리 배수 적용: 점수 ×$nagariMultiplier (${score ~/ nagariMultiplier} → $score)'
-      );
-    }
-
-    // ⑥ 피박·광박·멍박 배수 적용 (게임 종료 시에만 적용)
-    // 규칙: 상대방이 박에 걸렸으면 "내" 점수를 2배 한다.
-    final int opponent = playerNum == 1 ? 2 : 1;
-    if (piBakPlayers.contains(opponent)) {
-      score *= 2;
-      logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '피박 배수 적용 (상대 피박): 점수 2배 (${score ~/ 2} → $score)'
-      );
-    }
-    if (gwangBakPlayers.contains(opponent)) {
-      score *= 2;
-      logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '광박 배수 적용 (상대 광박): 점수 2배 (${score ~/ 2} → $score)'
-      );
-    }
-    if (mungBakPlayers.contains(opponent)) {
-      score *= 2;
-      logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '멍박 배수 적용 (상대 멍박): 점수 2배 (${score ~/ 2} → $score)'
-      );
-    }
-
-    // ── 상세 점수 계산 로그 ──
-    print('🎯 플레이어 $playerNum 점수 계산 상세:');
-    print('   획득 카드: ${captured.map((c) => '${c.id}(${c.name})[${c.type}]').toList()}');
-    print('   광: ${gwangCards.length}장 (${gwangCards.map((c) => c.month).toList()}) → ${gwangCards.length >= 3 ? (gwangCards.length == 3 ? (hasRainGwang ? 2 : 3) : (gwangCards.length == 4 ? 4 : 15)) : 0}점');
-    print('   동물: ${animalCards.length}장 → ${animalCards.length >= 5 ? animalCards.length - 4 : 0}점');
-    print('   띠: ${ttiCards.length}장 → ${ttiCards.length >= 5 ? ttiCards.length - 4 : 0}점');
-    print('   피: ${piCards.length}장 (총 ${totalPiScore}점) → ${totalPiScore >= 10 ? totalPiScore - 9 : 0}점');
-    print('   고도리: $godoriHas → ${godoriHas ? 5 : 0}점');
-    print('   기본점수: $baseScore점');
-    print('   GO 횟수: $goCount → 보너스: $goBonus점');
-    print('   흔들: ${heundalPlayers.contains(playerNum)}');
-    print('   폭탄: ${bombPlayers.contains(playerNum)}');
-    print('   피박: ${piBakPlayers.contains(playerNum)}');
-    print('   광박: ${gwangBakPlayers.contains(playerNum)}');
-    print('   멍박: ${mungBakPlayers.contains(playerNum)}');
-    print('   최종점수: $score점');
-    
-    // 로그 업데이트
-    logger.logActualProcessing('점수 계산 완료', {
-      'baseScore': baseScore,
-      'totalScore': score,
-      'goCount': goCount,
-      'totalPi': totalPiScore,
-      'animalCount': animalCards.length,
-      'godori': godoriHas,
-      'hongdan': hongdanMonths.every((m) => captured.any((c) => c.type == '띠' && c.month == m)),
-      'chungdan': chungdanMonths.every((m) => captured.any((c) => c.type == '띠' && c.month == m)),
-      'chodan': chodanMonths.every((m) => captured.any((c) => c.type == '띠' && c.month == m)),
-      'bomb': bombPlayers.contains(playerNum),
-      'heundal': false,
-    }, playerNum, 'turnEnd');
-
-    return score;
-  }
-  
   String getResult() {
     if (!gameOver || winner == null) return "게임이 진행 중입니다.";
     
@@ -1591,7 +1427,8 @@ baseScore += piScore;
       );
       
       // 쓸 애니메이션 트리거
-      _triggerAnimation(AnimationEventType.sseul, {
+      _triggerAnimation(AnimationEventType.specialEffect, {
+        'effect': 'sseul',
         'player': currentPlayer,
       });
       

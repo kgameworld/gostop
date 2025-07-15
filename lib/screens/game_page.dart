@@ -25,6 +25,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/settings_dialog.dart';
 import 'dart:math';
 import '../providers/locale_provider.dart';
+import '../widgets/floating_text_effect.dart';
 
 class GamePage extends StatefulWidget {
   final String mode;
@@ -53,7 +54,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   bool isTensionMode = false;
 
   // 뻑 이펙트 테스트 상태
-  bool showPpeokEffect = false;
+
 
   // 필드 카드별 GlobalKey 관리
   final Map<String, GlobalKey> fieldCardKeys = {};
@@ -73,8 +74,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   // 즉시 점수 업데이트 및 GO/STOP 조건 확인을 위한 메서드
   void _updateScoresAndCheckGoStop() {
     setState(() {
-      _displayPlayerScore = engine.calculateScore(1);
-      _displayOpponentScore = engine.calculateScore(2);
+      _displayPlayerScore = engine.calculateBaseScore(1);
+      _displayOpponentScore = engine.calculateBaseScore(2);
     });
     
     // GO/STOP 조건 즉시 확인
@@ -102,8 +103,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       engine.checkBakConditions();
       
       // ── GO/STOP 대기 상태인지 확인 ──
-      final currentPlayerScore = engine.calculateScore(1);
-      final currentAiScore = engine.calculateScore(2);
+      final currentPlayerScore = engine.calculateBaseScore(1);
+      final currentAiScore = engine.calculateBaseScore(2);
       if ((currentPlayerScore >= 7 || currentAiScore >= 7) && !engine.awaitingGoStop) {
         engine.awaitingGoStop = true;
         setState(() {}); // UI 업데이트로 GO/STOP 버튼 활성화
@@ -113,8 +114,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       // ── GO/STOP 대기 상태가 아닐 때만 AI 턴 시작 ──
       if (engine.currentPlayer == 2 && !engine.isGameOver() && !engine.awaitingGoStop) {
         // 추가 안전장치: 점수 재확인
-        final finalPlayerScore = engine.calculateScore(1);
-        final finalAiScore = engine.calculateScore(2);
+        final finalPlayerScore = engine.calculateBaseScore(1);
+        final finalAiScore = engine.calculateBaseScore(2);
         if (finalPlayerScore < 7 && finalAiScore < 7) {
           _runAiTurnIfNeeded();
         }
@@ -239,8 +240,55 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   void _handleSpecialEffect(Map<String, dynamic> data) {
-    // 특수 효과 애니메이션/이펙트 비활성화
-    return;
+    final effect = data['effect'] as String? ?? 'unknown';
+    final GoStopCard? anchorCard = data['anchorCard'] as GoStopCard?;
+
+    // 텍스트 매핑
+    final Map<String, String> textMap = {
+      'ppeok': '뻑!',
+      'ppeokFinish': '오예!',
+      'bomb': '폭탄!',
+      'chok': '쪽!',
+      'ttak': '따닥!',
+      'sseul': '쓸!',
+    };
+
+    final displayText = textMap[effect] ?? effect;
+
+    // 위치 계산
+    Offset pos;
+    final Size screenSize = MediaQuery.of(context).size;
+    final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
+    // 필드 카드 비율(손패 카드의 80%)과 동일한 값 사용
+    final double cardWidth = minSide * 0.13 * 0.8; // 약 10.4% 비율
+    const double gap = 8.0; // 카드와 텍스트 간 간격
+
+    if (effect == 'sseul') {
+      // 카드더미 기준 위치 → 오른쪽으로 이동 후 살짝 위로 보정
+      final Offset deckPos = _getCardPosition('deck', anchorCard ?? GoStopCard.bomb());
+      pos = deckPos.translate(cardWidth + gap, -10);
+    } else if (anchorCard != null) {
+      // 앵커 카드 기준 위치 → 오른쪽으로 이동 후 살짝 위로 보정
+      final Offset cardPos = _getCardPosition('field', anchorCard);
+      pos = cardPos.translate(cardWidth + gap, -10);
+    } else {
+      // 화면 중앙 fallback
+      pos = Offset(screenSize.width / 2, screenSize.height / 2);
+    }
+
+    setState(() {
+      activeAnimations.add(
+        FloatingTextEffect(
+          text: displayText,
+          position: pos,
+          onComplete: () {
+            setState(() {
+              activeAnimations.removeWhere((w) => w is FloatingTextEffect && (w as FloatingTextEffect).text == displayText);
+            });
+          },
+        ),
+      );
+    });
   }
 
   // 폭탄 애니메이션 처리: 손패의 3장을 한장씩 필드로 이동하면서 실시간 매치 처리
@@ -924,8 +972,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     
     // AI 턴에서도 고/스톱 결정과 턴 계속 처리
     if (engine.awaitingGoStop && engine.currentPlayer == 2) {
-      final aiScore = engine.calculateScore(2);
-      final playerScore = engine.calculateScore(1);
+      final aiScore = engine.calculateBaseScore(2);
+      final playerScore = engine.calculateBaseScore(1);
       
       // AI가 7점 이상일 때 자동으로 GO/STOP 결정 (사용자에게 물어보지 않음)
       if (aiScore >= 7) {
@@ -1704,8 +1752,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                 // ── 명확한 분기 처리: AI 턴 vs 플레이어 턴 ──
                 if (engine.currentPlayer == 2) {
                   // AI 턴일 때만 자동 판단
-                  final aiScore = engine.calculateScore(2);
-                  final playerScore = engine.calculateScore(1);
+                  final aiScore = engine.calculateBaseScore(2);
+                  final playerScore = engine.calculateBaseScore(1);
                   
                   // AI가 7점 이상일 때만 GO/STOP 판단
                   if (aiScore >= 7) {
@@ -1816,42 +1864,14 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                           tooltip: AppLocalizations.of(context)!.settings,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      // 뻑 이펙트 테스트 버튼
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.redAccent,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () {
-                          setState(() => showPpeokEffect = true);
-                          Future.delayed(const Duration(milliseconds: 1100), () {
-                            if (mounted) setState(() => showPpeokEffect = false);
-                          });
-                        },
-                        child: const Text('Show PPEOK Effect'),
-                      ),
+
+                      
                     ],
                   );
                 },
               ),
             ),
-            // 카드더미 옆에 뻑 이펙트 표시 (테스트용)
-            if (showPpeokEffect)
-              Positioned(
-                // 카드더미는 중앙 기준, 약간 오른쪽에 띄움 (반응형)
-                left: MediaQuery.of(context).size.width / 2 + 80,
-                top: MediaQuery.of(context).size.height / 2 - 36,
-                child: IgnorePointer(
-                  child: SpecialEffectAnimation(
-                    effectType: 'ppeok',
-                    onComplete: () {}, // 자동 사라짐
-                  ),
-                ),
-              ),
+
             
             // AI 실시간 점수표 (턴 종료 후에만 업데이트)
             // Positioned(
