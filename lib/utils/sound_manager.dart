@@ -19,7 +19,8 @@ class SoundManager {
   final AudioPlayer _player = AudioPlayer();
   final AudioPlayer _bgmPlayer = AudioPlayer();
   bool _isBgmPlaying = false; // 현재 BGM 재생 여부
-  bool _bgmMuted = false;
+  // 테스트 기본값: BGM을 OFF 상태로 시작 (muted=true)
+  bool _bgmMuted = true;
   double _bgmVolume = 0.5; // 마지막 설정된 볼륨을 기억
   bool _bgmLoopAttached = false; // loop listener once
 

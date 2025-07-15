@@ -4,17 +4,27 @@ import '../utils/sound_manager.dart';
 import '../l10n/app_localizations.dart';
 
 class GoSelectionDialog extends StatefulWidget {
-  final int currentGoCount;
-  final int playerScore;
-  final int opponentScore;
+  final int currentGoCount;         // 현재 GO 횟수
+  final int playerScore;           // 배수 포함 현재 내 점수
+  final int opponentScore;         // 배수 포함 상대 점수
+  final int coinChangeIfStop;      // 지금 STOP 시 코인 증감
   final Function(bool) onSelection;
+  final bool isPlayerGwangBak;     // 플레이어 광박 상태
+  final bool isPlayerPiBak;        // 플레이어 피박 상태
+  final bool isOpponentGwangBak;   // 상대방 광박 상태
+  final bool isOpponentPiBak;      // 상대방 피박 상태
 
   const GoSelectionDialog({
     super.key,
     required this.currentGoCount,
     required this.playerScore,
     required this.opponentScore,
+    required this.coinChangeIfStop,
     required this.onSelection,
+    required this.isPlayerGwangBak,
+    required this.isPlayerPiBak,
+    required this.isOpponentGwangBak,
+    required this.isOpponentPiBak,
   });
 
   @override
@@ -122,59 +132,142 @@ class _GoSelectionDialogState extends State<GoSelectionDialog>
 
   Widget _buildScoreInfo() {
     final nextGoBonus = _getNextGoBonus();
-    
+
+    // GO 시 점수 변화 문구 계산 (박 상태 포함)
+    String goInfo;
+    if (widget.currentGoCount >= 2) {
+      // 3GO 이상일 때는 매 GO 마다 2배
+      goInfo = "GO 선택 시 점수 ×2";
+    } else {
+      goInfo = "GO 선택 시 +${nextGoBonus.toInt()}점";
+    }
+
+    // STOP 시 코인 증감 문구
+    final coinInfo = widget.coinChangeIfStop >= 0
+        ? "+${widget.coinChangeIfStop} 코인"
+        : "${widget.coinChangeIfStop} 코인";
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.6),
+        color: Colors.black.withOpacity(0.7),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: Colors.white.withOpacity(0.3),
           width: 1,
         ),
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 내 점수
-          Text(
-            AppLocalizations.of(context)!.myScore(widget.playerScore), // 내 점수
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
+          // ── 점수 정보 (박 상태 포함) ──
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildScoreWithBakStatus(widget.playerScore, true), // 플레이어 점수
+              const SizedBox(width: 12),
+              _buildScoreWithBakStatus(widget.opponentScore, false), // AI 점수
+            ],
           ),
-          const SizedBox(width: 16),
-          Text(
-            AppLocalizations.of(context)!.aiScore(widget.opponentScore), // AI 점수
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.amber, Colors.orange],
+          const SizedBox(height: 6),
+          // ── STOP / GO 보너스 정보 ──
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Colors.amber, Colors.orange],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  goInfo,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-              borderRadius: BorderRadius.circular(12),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade800,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  "STOP 시 $coinInfo",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 박 상태를 포함한 점수 표시 위젯
+  Widget _buildScoreWithBakStatus(int score, bool isPlayer) {
+    // 실제 박 상태 정보 사용
+    bool hasGwangBak = isPlayer ? widget.isPlayerGwangBak : widget.isOpponentGwangBak;
+    bool hasPiBak = isPlayer ? widget.isPlayerPiBak : widget.isOpponentPiBak;
+    
+    String scoreText = isPlayer 
+        ? AppLocalizations.of(context)!.myScore(score)
+        : AppLocalizations.of(context)!.aiScore(score);
+    
+    // 박 상태가 있으면 표시
+    if (hasGwangBak || hasPiBak) {
+      List<String> bakStatus = [];
+      if (hasGwangBak) bakStatus.add('광박×2');
+      if (hasPiBak) bakStatus.add('피박×2');
+      
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            scoreText,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              AppLocalizations.of(context)!.goBonus(_getNextGoBonus()), // GO 보너스
+              bakStatus.join(' '),
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 12,
+                fontSize: 10,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
         ],
+      );
+    }
+    
+    return Text(
+      scoreText,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.5,
       ),
     );
   }

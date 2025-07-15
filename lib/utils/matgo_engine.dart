@@ -83,6 +83,14 @@ class MatgoEngine {
 
   // 애니메이션 이벤트 발생
   void _triggerAnimation(AnimationEventType type, Map<String, dynamic> data) {
+    // 특수 효과(따닥, 쪽, 폭탄, 쓸, 뻑, 족보 등) 애니메이션/이펙트 비활성화
+    if (type == AnimationEventType.specialEffect ||
+        type == AnimationEventType.ppeok ||
+        type == AnimationEventType.sseul ||
+        type == AnimationEventType.bomb) {
+      // 효과 비활성화: 아무 동작도 하지 않음
+      return;
+    }
     if (type == AnimationEventType.cardMove) {
       SoundManager.instance.play(Sfx.cardOverlap);
     }
@@ -239,8 +247,8 @@ class MatgoEngine {
       }
     }
     
-    // 피박 조건: 승자가 피 점수를 얻었고, 패자가 피 6장 이하
-    if (winnerPiScore > 0 && loserPiCount <= 6) {
+    // 피박 조건: 승자가 피 점수를 얻었고, 패자가 피 7장 이하
+    if (winnerPiScore > 0 && loserPiCount <= 7) {
       piBakPlayers.add(loser);
       logger.addLog(loser, 'gameEnd', LogLevel.info, 
         '피박 발생: 플레이어 $loser (피 $loserPiCount장) - 승자 피 점수: $winnerPiScore'
@@ -253,7 +261,7 @@ class MatgoEngine {
     
     // 승자의 광 점수 계산
     int winnerGwangScore = 0;
-    final hasRainGwang = winnerGwangCards.any((c) => c.month == 11);
+    final hasRainGwang = winnerGwangCards.any((c) => c.month == 12);
     if (winnerGwangCards.length == 3) {
       winnerGwangScore = hasRainGwang ? 2 : 3;
     } else if (winnerGwangCards.length == 4) {
@@ -407,17 +415,14 @@ class MatgoEngine {
       final handSameMonth = deckManager.getPlayerHand(playerIdx).where((c) => c.month == bombMonth).toList();
       final fieldSameMonth = deckManager.fieldCards.where((c) => c.month == bombMonth).toList();
       
-      // 손패에서 같은 월 3장 모두 제거 (낸 카드 포함)
-      for (final handCard in handSameMonth) {
-        deckManager.playerHands[playerIdx]?.removeWhere((c) => c.id == handCard.id);
-      }
+      // 폭탄 이펙트 트리거 추가
+      _triggerAnimation(AnimationEventType.specialEffect, {
+        'effect': 'bomb',
+        'player': currentPlayer,
+      });
       
-      // 폭탄 카드들을 pendingCaptured에 추가 (손패 3장 + 필드 1장 = 총 4장)
-      final bombCards = [...handSameMonth, ...fieldSameMonth];
-      pendingCaptured.addAll(bombCards);
-      
-      // 필드에서 폭탄 카드들 제거
-      deckManager.fieldCards.removeWhere((c) => c.month == bombMonth);
+      // 폭탄 플레이어 표시
+      bombPlayers.add(currentPlayer);
       
       // 폭탄카드 2장을 손패에 추가
       final bombCard1 = GoStopCard.bomb();
@@ -427,39 +432,33 @@ class MatgoEngine {
       // 피 강탈
       _stealOpponentPi(currentPlayer - 1);
       
-      // 폭탄 플레이어 표시
-      bombPlayers.add(currentPlayer);
+      // 폭탄 카드들을 pendingCaptured에 추가 (손패 3장 + 필드 1장 = 총 4장)
+      final bombCards = [...handSameMonth, ...fieldSameMonth];
+      pendingCaptured.addAll(bombCards);
       
-      // 폭탄 이펙트 트리거 추가
-      _triggerAnimation(AnimationEventType.specialEffect, {
-        'effect': 'bomb',
-        'player': currentPlayer,
-      });
+      // 필드에서 폭탄 카드들 제거
+      deckManager.fieldCards.removeWhere((c) => c.month == bombMonth);
       
       logger.logActualProcessing('폭탄 처리', {
         'bombMonth': bombMonth,
-        'handCardsRemoved': handSameMonth.map((c) => '${c.id}(${c.name})').toList(),
+        'handCardsForAnimation': handSameMonth.map((c) => '${c.id}(${c.name})').toList(),
         'fieldCardsRemoved': fieldSameMonth.map((c) => '${c.id}(${c.name})').toList(),
         'pendingCaptured': pendingCaptured.map((c) => '${c.id}(${c.name})').toList(),
         'bombCardsAdded': ['폭탄카드 2장'],
-        'nextPhase': 'flippingCard',
+        'nextPhase': 'bombAnimation',
       }, currentPlayer, 'playingCard');
       
-      // 폭탄카드 3~4장을 한 장씩 순차적으로 애니메이션 트리거 (기존 cardMove 애니메이션 재사용)
-      Future(() async {
-        for (final bombCard in bombCards) {
-          _triggerAnimation(AnimationEventType.cardMove, {
-            'cards': [bombCard],
-            'from': 'hand',
-            'to': 'fieldOverlap',
-            'player': currentPlayer,
-          });
-          // 0.25초 간격으로 순차 애니메이션 (필요시 조정)
-          await Future.delayed(Duration(milliseconds: 250));
-        }
-        // 모든 애니메이션이 끝난 뒤 카드더미에서 한 장을 뒤집음
-        currentPhase = TurnPhase.flippingCard;
-        flipFromDeck();
+      // 폭탄 애니메이션: 손패의 3장을 한장씩 필드로 이동하는 애니메이션
+      _triggerAnimation(AnimationEventType.bomb, {
+        'handCards': handSameMonth, // 손패에서 나올 실제 카드들
+        'fieldCards': fieldSameMonth, // 필드에 있던 카드들
+        'player': currentPlayer,
+        'bombMonth': bombMonth,
+        'onComplete': () {
+          // 카드더미에서 한 장 뒤집기
+          currentPhase = TurnPhase.flippingCard;
+          flipFromDeck();
+        },
       });
       return;
     }
@@ -547,42 +546,43 @@ class MatgoEngine {
     // 카드더미에서 카드 한 장을 뒤집음 (보너스피 연속 처리)
     GoStopCard? drawnCard = overrideCard ?? deckManager.drawPile.removeAt(0);
 
-    // 보너스피가 연속으로 나올 수 있으므로, 보너스가 아닐 때까지 계속 뒤집음
-    while (drawnCard != null && drawnCard.isBonus) {
-      logger.addLog(currentPlayer, 'flippingCard', LogLevel.info, '보너스피 발견: ${drawnCard.id}(${drawnCard.name})');
+    // 보너스피가 나오면 애니메이션 완료 후 재귀적으로 flipFromDeck()을 호출하여
+    // "겹침 → 애니메이션 종료 → 다음 카드 뒤집기" 순서를 보장한다.
+    if (drawnCard.isBonus) {
+      logger.addLog(currentPlayer, 'flippingCard', LogLevel.info,
+          '보너스피 발견: ${drawnCard.id}(${drawnCard.name})');
 
-      // ① 내가 낸 손패카드 위에 겹치고 한 장 더 뒤집기
+      // ① 내가 낸 카드 위에 겹침 처리 (UI 표시용)
       if (playedCard != null) {
-        // 보너스피를 내가 낸 카드 위에 겹침 (UI 표시를 위해)
         deckManager.fieldCards.add(drawnCard);
-        
-        // 내가 낸 카드와 보너스피를 pendingCaptured에 추가 (나중에 획득)
         pendingCaptured.addAll([playedCard!, drawnCard]);
-        
-        logger.addLog(currentPlayer, 'flippingCard', LogLevel.info, 
-          '보너스피 겹침: ${playedCard!.id}(${playedCard!.name}) + ${drawnCard.id}(${drawnCard.name})'
-        );
+        logger.addLog(currentPlayer, 'flippingCard', LogLevel.info,
+            '보너스피 겹침: ${playedCard!.id}(${playedCard!.name}) + ${drawnCard.id}(${drawnCard.name})');
       } else {
-        // 내가 낸 카드가 없는 경우 (AI 턴 등) 보너스피만 획득
+        // AI가 먼저 뒤집어 보너스피가 나온 경우 등
         pendingCaptured.add(drawnCard);
-        logger.addLog(currentPlayer, 'flippingCard', LogLevel.info, 
-          '보너스피 단독 획득: ${drawnCard.id}(${drawnCard.name})'
-        );
+        logger.addLog(currentPlayer, 'flippingCard', LogLevel.info,
+            '보너스피 단독 획득: ${drawnCard.id}(${drawnCard.name})');
       }
 
-      // ② 애니메이션 실행 (더미 → 겹침)
+      // ② 애니메이션 실행. 완료 후 다음 카드 뒤집기.
       _triggerAnimation(AnimationEventType.bonusCard, {
         'card': drawnCard,
         'player': currentPlayer,
+        'onComplete': () {
+          // 애니메이션 종료 후 재귀 호출로 다음 카드 처리
+          if (deckManager.drawPile.isEmpty) {
+            logger.addLog(currentPlayer, 'flippingCard', LogLevel.info,
+                '[DEBUG] 카드더미 소진: 보너스피만 뒤집힘');
+            checkReverseGo();
+            _endTurn();
+          } else {
+            flipFromDeck();
+          }
+        },
       });
 
-      // ③ 카드더미에서 한 장 더 뒤집기 (규칙에 맞게)
-      if (deckManager.drawPile.isEmpty) {
-        // 더 이상 뒤집을 카드가 없으면 종료
-        drawnCard = null;
-        break;
-      }
-      drawnCard = deckManager.drawPile.removeAt(0);
+      return; // 보너스피 처리 후 즉시 반환 (다음 로직은 onComplete에서 실행)
     }
 
     // 뒤집은 결과가 없거나(모두 보너스) 더는 카드가 없으면 턴 종료 처리
@@ -644,6 +644,10 @@ class MatgoEngine {
     _stealOpponentPi(currentPlayer - 1);
     // 상태 초기화
     ppeokMonth = null;
+    
+    // 뻑 완성 매치 사운드 재생 (즉시)
+    SoundManager.instance.play(Sfx.cardOverlap);
+    
     logger.logActualProcessing('뻑 완성 처리 (4장 모두 획득)', {
       'pendingCaptured': pendingCaptured.map((c) => '${c.id}(${c.name})').toList(),
     }, currentPlayer, 'flippingCard');
@@ -672,12 +676,18 @@ class MatgoEngine {
       'player': currentPlayer,
     });
     
+    // 쪽 매치 사운드 재생 (즉시)
+    SoundManager.instance.play(Sfx.cardOverlap);
+    
     _stealOpponentPi(currentPlayer - 1);
     checkReverseGo();
     _endTurn();
   }
 
   void handlePpeokStart(GoStopCard drawnCard) {
+    // 뻑 발생 매치 사운드 재생 (즉시)
+    SoundManager.instance.play(Sfx.cardOverlap);
+    
     final allPpeokCards = <GoStopCard>[];
     allPpeokCards.addAll(deckManager.fieldCards.where((c) => c.month == drawnCard.month));
     if (playedCard != null && playedCard!.month == drawnCard.month && !allPpeokCards.any((c) => c.id == playedCard!.id)) {
@@ -708,6 +718,9 @@ class MatgoEngine {
   }
 
   void handleTtakTtak(GoStopCard drawnCard, List<GoStopCard> fieldMatches) {
+    // 따닥 매치 사운드 재생 (즉시)
+    SoundManager.instance.play(Sfx.cardOverlap);
+    
     // 기존 pendingCaptured에 추가 (중복 방지)
     if (!pendingCaptured.any((c) => c.id == playedCard!.id)) {
       pendingCaptured.add(playedCard!);
@@ -721,6 +734,7 @@ class MatgoEngine {
       }
     }
     deckManager.fieldCards.add(drawnCard);
+    
     _stealOpponentPi(currentPlayer - 1);
     checkReverseGo();
     _endTurn();
@@ -731,6 +745,9 @@ class MatgoEngine {
     if (matches.length == 2 &&
         matches.every((c) => c.type == '피' &&
             !(c.imageUrl.contains('ssangpi') || c.imageUrl.contains('3pi') || c.isBonus))) {
+      // 자동 매치 사운드 재생 (즉시)
+      SoundManager.instance.play(Sfx.cardOverlap);
+      
       // 한글 주석: 모두 일반 1피일 때는 선택창 없이 첫 번째 카드를 자동으로 먹음
       pendingCaptured.add(matches.first);
       deckManager.fieldCards.removeWhere((c) => c.id == matches.first.id);
@@ -742,6 +759,7 @@ class MatgoEngine {
       }
       // 선택창 띄우지 않고 바로 턴 종료
       choices.clear();
+      
       currentPhase = TurnPhase.playingCard;
       _endTurn();
       return;
@@ -775,6 +793,9 @@ class MatgoEngine {
   }
 
   void captureOnePair(GoStopCard drawnCard, GoStopCard match) {
+    // 1장 매치 사운드 재생 (즉시)
+    SoundManager.instance.play(Sfx.cardOverlap);
+    
     // 뒤집은 카드를 필드에 추가 (UI 표시를 위해)
     deckManager.fieldCards.add(drawnCard);
     
@@ -812,11 +833,19 @@ class MatgoEngine {
       handlePpeokStart(drawnCard);
       return;
     }
-    // 4. 따닥
-    final fieldMatches = getField().where((c) => c.month == drawnCard.month).toList();
-    if (fieldMatches.length == 2 && playedCard != null && playedCard!.month == drawnCard.month && fieldMatches[0].month == drawnCard.month && fieldMatches[1].month == drawnCard.month) {
-      handleTtakTtak(drawnCard, fieldMatches);
-      return;
+    // 4. 따닥 (hadTwoMatch 포함)
+    final fieldMatches =
+        getField().where((c) => c.month == drawnCard.month).toList();
+    if (playedCard != null && playedCard!.month == drawnCard.month &&
+        fieldMatches.length >= 2) {
+      // 실제 매치 카드(플레이드/드로 카드 제외) 2장 여부 확인
+      final realMatches = fieldMatches
+          .where((c) => c.id != playedCard!.id && c.id != drawnCard.id)
+          .toList();
+      if (realMatches.length == 2) {
+        handleTtakTtak(drawnCard, realMatches);
+        return;
+      }
     }
     // 5. hadTwoMatch 후 2장 매치
     if (hadTwoMatch && playedCard != null) {
@@ -847,6 +876,9 @@ class MatgoEngine {
     logger.addLog(currentPlayer, 'chooseMatch', LogLevel.info, 
       '카드 선택: [36m${chosenCard.id}(${chosenCard.name})[0m'
     );
+    
+    // 카드 선택 매치 사운드 재생 (즉시)
+    SoundManager.instance.play(Sfx.cardOverlap);
     
     // 선택한 카드만 먹은 카드로 분류, 선택 안 한 카드는 필드에 남김
     pendingCaptured.add(chosenCard); // 선택한 카드만 먹음
@@ -913,50 +945,20 @@ class MatgoEngine {
 
     // [고스톱 규칙] 매치된 카드는 무조건 내 획득 카드로 이동 (뻑 월 4장만 필드에 남김)
     if (pendingCaptured.isNotEmpty) {
-      // 애니메이션 트리거
+      // 뻑 상태면 뻑월 카드는 제외하고 획득 애니메이션 트리거
+      List<GoStopCard> toCapture = List<GoStopCard>.from(pendingCaptured);
+      if (ppeokMonth != null) {
+        toCapture = toCapture.where((c) => c.month != ppeokMonth).toList();
+      }
       _triggerAnimation(AnimationEventType.cardCapture, {
-        'cards': List<GoStopCard>.from(pendingCaptured),
+        'cards': toCapture,
         'player': currentPlayer,
       });
-      logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '획득 카드 처리 시작: ${pendingCaptured.map((c) => '${c.id}(${c.name})').toList()}');
+      logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '획득 카드 처리 시작: ${toCapture.map((c) => '${c.id}(${c.name})').toList()}');
       logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '매치 처리 시점 필드 카드: ${deckManager.fieldCards.map((c) => '${c.id}(${c.name})[월${c.month}]').toList()}');
 
-      if (ppeokMonth != null) {
-        // 뻑 완성(4장 모두 먹는 상황)일 때는 pendingCaptured 전체를 획득 카드로 이동하고, 필드에서는 해당 월 카드들을 모두 제거
-        if (pendingCaptured.where((c) => c.month == ppeokMonth).length >= 4) {
-          // 한글 주석: 뻑 완성 - 4장 모두 먹기
-          deckManager.capturedCards[playerIdx]?.addAll(pendingCaptured);
-          // 필드에서 해당 월 카드들 모두 제거
-          deckManager.fieldCards.removeWhere((c) => c.month == ppeokMonth);
-          logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '뻑 완성: 4장 모두 획득 카드로 이동, 필드에서 해당 월 카드 제거');
-        } else {
-          // 뻑 상태(완성 아님): 뻑 월 카드만 필드에 남기고 나머지는 모두 획득 카드로 이동
-          final ppeokCards = pendingCaptured.where((c) => c.month == ppeokMonth).toList();
-          final nonPpeokCards = pendingCaptured.where((c) => c.month != ppeokMonth).toList();
-          if (nonPpeokCards.isNotEmpty) {
-            deckManager.capturedCards[playerIdx]?.addAll(nonPpeokCards);
-            logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '뻑 상태: 뻑 월 제외하고 획득 카드 이동 - ${nonPpeokCards.map((c) => '${c.id}(${c.name})').toList()}');
-          }
-          // 필드에서 이번 턴에 먹은 모든 카드를 제거
-          deckManager.fieldCards.removeWhere((c) => pendingCaptured.any((rc) => rc.id == c.id));
-          // 뻑 월 카드만 필드에 남김 (중복 없이)
-          deckManager.fieldCards.addAll(ppeokCards.where((c) => !deckManager.fieldCards.any((f) => f.id == c.id)));
-          logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '뻑 상태: 뻑 월 카드 필드 유지 - ${ppeokCards.map((c) => '${c.id}(${c.name})').toList()}');
-          // 필드에서 중복 제거
-          final uniqueFieldCards = deckManager.fieldCards.toSet().toList();
-          deckManager.fieldCards.clear();
-          deckManager.fieldCards.addAll(uniqueFieldCards);
-        }
-        // 필드에서 획득 카드 제거(중복 방지)
-        deckManager.fieldCards.removeWhere((c) => pendingCaptured.any((rc) => rc.id == c.id));
-      } else {
-        // [일반] 모든 pendingCaptured를 획득 카드로 이동
-        deckManager.capturedCards[playerIdx]?.addAll(pendingCaptured);
-        logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '획득 카드 이동 완료: ${pendingCaptured.map((c) => '${c.id}(${c.name})').toList()}');
-        // 필드에서 획득 카드 제거
-        deckManager.fieldCards.removeWhere((c) => pendingCaptured.any((rc) => rc.id == c.id));
-      }
-      pendingCaptured.clear();
+      // 애니메이션 완료 후 실제 카드 데이터 이동은 UI에서 처리
+      // 여기서는 pendingCaptured를 유지하여 애니메이션 중에도 필드에 카드가 보이도록 함
     }
 
     // 쓸(Sseul) 조건 체크 및 처리
@@ -1090,6 +1092,8 @@ class MatgoEngine {
       final stolen = normalPi.first;
       opponentCaptured.remove(stolen);
       myCaptured?.add(stolen); // 즉시 내 획득 카드로 이동
+      // UI 획득 애니메이션을 위해 pendingCaptured에도 추가
+      _addToPendingCaptured(stolen);
       // 피 강탈 애니메이션 트리거
       _triggerAnimation(AnimationEventType.specialEffect, {
         'effect': 'piSteal',
@@ -1111,6 +1115,8 @@ class MatgoEngine {
       final stolen = ssangpi.first;
       opponentCaptured.remove(stolen);
       myCaptured?.add(stolen);
+      // UI 획득 애니메이션을 위해 pendingCaptured에도 추가
+      _addToPendingCaptured(stolen);
       _triggerAnimation(AnimationEventType.specialEffect, {
         'effect': 'piSteal',
         'player': playerIdx + 1,
@@ -1130,6 +1136,8 @@ class MatgoEngine {
       final stolen = bonusPi.first;
       opponentCaptured.remove(stolen);
       myCaptured?.add(stolen);
+      // UI 획득 애니메이션을 위해 pendingCaptured에도 추가
+      _addToPendingCaptured(stolen);
       _triggerAnimation(AnimationEventType.specialEffect, {
         'effect': 'piSteal',
         'player': playerIdx + 1,
@@ -1183,7 +1191,7 @@ class MatgoEngine {
     
     // 광 점수 계산
     final gwangCards = captured.where((c) => c.type == '광').toList();
-    final hasRainGwang = gwangCards.any((c) => c.month == 11); // 비광(11월 광) 포함 여부
+    final hasRainGwang = gwangCards.any((c) => c.month == 12); // 비광(12월 광) 포함 여부
     if (gwangCards.length == 3) {
       if (hasRainGwang) {
         gwangScore = 2; // 비광 포함 3광
@@ -1294,22 +1302,24 @@ class MatgoEngine {
     }
 
     // ⑥ 피박·광박·멍박 배수 적용 (게임 종료 시에만 적용)
-    if (piBakPlayers.contains(playerNum)) {
+    // 규칙: 상대방이 박에 걸렸으면 "내" 점수를 2배 한다.
+    final int opponent = playerNum == 1 ? 2 : 1;
+    if (piBakPlayers.contains(opponent)) {
       score *= 2;
       logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '피박 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
+        '피박 배수 적용 (상대 피박): 점수 2배 (${score ~/ 2} → $score)'
       );
     }
-    if (gwangBakPlayers.contains(playerNum)) {
+    if (gwangBakPlayers.contains(opponent)) {
       score *= 2;
       logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '광박 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
+        '광박 배수 적용 (상대 광박): 점수 2배 (${score ~/ 2} → $score)'
       );
     }
-    if (mungBakPlayers.contains(playerNum)) {
+    if (mungBakPlayers.contains(opponent)) {
       score *= 2;
       logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '멍박 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
+        '멍박 배수 적용 (상대 멍박): 점수 2배 (${score ~/ 2} → $score)'
       );
     }
 
@@ -1332,6 +1342,10 @@ class MatgoEngine {
   }
 
   int calculateScore(int playerNum) {
+    // ── 실시간 박 상태 체크 (점수 계산 전에 박 상태 최신화) ──
+    // 무한 루프 방지를 위해 박 상태 체크는 한 번만 실행
+    checkBakConditions();
+    
     // 현재 플레이어의 pendingCaptured만 포함 (무한 루프 방지)
     final captured = [...getCaptured(playerNum)];
     if (playerNum == currentPlayer && pendingCaptured.isNotEmpty) {
@@ -1352,7 +1366,7 @@ class MatgoEngine {
     
     // 광 점수 계산
     final gwangCards = captured.where((c) => c.type == '광').toList();
-    final hasRainGwang = gwangCards.any((c) => c.month == 11); // 비광(11월 광) 포함 여부
+    final hasRainGwang = gwangCards.any((c) => c.month == 12); // 비광(12월 광) 포함 여부
     if (gwangCards.length == 3) {
       if (hasRainGwang) {
         baseScore += 2; // 비광 포함 3광
@@ -1459,25 +1473,44 @@ baseScore += piScore;
     }
 
     // ⑥ 피박·광박·멍박 배수 적용 (게임 종료 시에만 적용)
-    if (piBakPlayers.contains(playerNum)) {
+    // 규칙: 상대방이 박에 걸렸으면 "내" 점수를 2배 한다.
+    final int opponent = playerNum == 1 ? 2 : 1;
+    if (piBakPlayers.contains(opponent)) {
       score *= 2;
       logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '피박 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
+        '피박 배수 적용 (상대 피박): 점수 2배 (${score ~/ 2} → $score)'
       );
     }
-    if (gwangBakPlayers.contains(playerNum)) {
+    if (gwangBakPlayers.contains(opponent)) {
       score *= 2;
       logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '광박 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
+        '광박 배수 적용 (상대 광박): 점수 2배 (${score ~/ 2} → $score)'
       );
     }
-    if (mungBakPlayers.contains(playerNum)) {
+    if (mungBakPlayers.contains(opponent)) {
       score *= 2;
       logger.addLog(playerNum, 'gameEnd', LogLevel.info, 
-        '멍박 배수 적용: 점수 2배 (${score ~/ 2} → $score)'
+        '멍박 배수 적용 (상대 멍박): 점수 2배 (${score ~/ 2} → $score)'
       );
     }
 
+    // ── 상세 점수 계산 로그 ──
+    print('🎯 플레이어 $playerNum 점수 계산 상세:');
+    print('   획득 카드: ${captured.map((c) => '${c.id}(${c.name})[${c.type}]').toList()}');
+    print('   광: ${gwangCards.length}장 (${gwangCards.map((c) => c.month).toList()}) → ${gwangCards.length >= 3 ? (gwangCards.length == 3 ? (hasRainGwang ? 2 : 3) : (gwangCards.length == 4 ? 4 : 15)) : 0}점');
+    print('   동물: ${animalCards.length}장 → ${animalCards.length >= 5 ? animalCards.length - 4 : 0}점');
+    print('   띠: ${ttiCards.length}장 → ${ttiCards.length >= 5 ? ttiCards.length - 4 : 0}점');
+    print('   피: ${piCards.length}장 (총 ${totalPiScore}점) → ${totalPiScore >= 10 ? totalPiScore - 9 : 0}점');
+    print('   고도리: $godoriHas → ${godoriHas ? 5 : 0}점');
+    print('   기본점수: $baseScore점');
+    print('   GO 횟수: $goCount → 보너스: $goBonus점');
+    print('   흔들: ${heundalPlayers.contains(playerNum)}');
+    print('   폭탄: ${bombPlayers.contains(playerNum)}');
+    print('   피박: ${piBakPlayers.contains(playerNum)}');
+    print('   광박: ${gwangBakPlayers.contains(playerNum)}');
+    print('   멍박: ${mungBakPlayers.contains(playerNum)}');
+    print('   최종점수: $score점');
+    
     // 로그 업데이트
     logger.logActualProcessing('점수 계산 완료', {
       'baseScore': baseScore,
@@ -1570,5 +1603,110 @@ baseScore += piScore;
   // 테스트용: 뻑 등 검증을 위해 drawnCard 처리 메서드 공개
   void processDrawnCardForTest(GoStopCard drawnCard) {
     _processDrawnCard(drawnCard);
+  }
+
+  // ── 실시간 박 상태 체크 (게임 종료 전에도 활성화) ──
+  void checkBakConditions() {
+    // 기존 박 상태 초기화
+    piBakPlayers.clear();
+    gwangBakPlayers.clear();
+    mungBakPlayers.clear();
+    
+    // 각 플레이어의 현재 상태 체크
+    for (int player = 1; player <= 2; player++) {
+      final opponent = player == 1 ? 2 : 1;
+      final playerCaptured = getCaptured(player);
+      final opponentCaptured = getCaptured(opponent);
+      
+      // ── 피박 체크 ──
+      // 플레이어의 피 점수 계산
+      final playerPiCards = playerCaptured.where((c) => c.type == '피').toList();
+      int playerPiScore = 0;
+      int totalPiScore = 0;
+      for (final c in playerPiCards) {
+        final img = c.imageUrl;
+        if (img.contains('bonus_3pi') || (c.isBonus && img.contains('3pi'))) {
+          totalPiScore += 3;
+        } else if (img.contains('bonus_ssangpi') || (c.isBonus && img.contains('ssangpi'))) {
+          totalPiScore += 2;
+        } else if (img.contains('3pi')) {
+          totalPiScore += 3;
+        } else if (img.contains('ssangpi')) {
+          totalPiScore += 2;
+        } else {
+          totalPiScore += 1;
+        }
+      }
+      if (totalPiScore >= 10) {
+        playerPiScore = totalPiScore - 9;
+      }
+      
+      // 상대방의 피 개수 계산
+      final opponentPiCards = opponentCaptured.where((c) => c.type == '피').toList();
+      int opponentPiCount = 0;
+      for (final c in opponentPiCards) {
+        final img = c.imageUrl;
+        if (img.contains('bonus_3pi') || (c.isBonus && img.contains('3pi'))) {
+          opponentPiCount += 3;
+        } else if (img.contains('bonus_ssangpi') || (c.isBonus && img.contains('ssangpi'))) {
+          opponentPiCount += 2;
+        } else if (img.contains('3pi')) {
+          opponentPiCount += 3;
+        } else if (img.contains('ssangpi')) {
+          opponentPiCount += 2;
+        } else {
+          opponentPiCount += 1;
+        }
+      }
+      
+      // 피박 조건: 플레이어가 피 점수를 얻었고, 상대방이 피 6장 이하
+      if (playerPiScore > 0 && opponentPiCount <= 6) {
+        piBakPlayers.add(opponent);
+        logger.addLog(opponent, 'turnEnd', LogLevel.info, 
+          '피박 발생: 플레이어 $opponent (피 $opponentPiCount장) - 플레이어 $player 피 점수: $playerPiScore'
+        );
+      }
+      
+      // ── 광박 체크 ──
+      // 플레이어의 광 점수 계산
+      final playerGwangCards = playerCaptured.where((c) => c.type == '광').toList();
+      final opponentGwangCards = opponentCaptured.where((c) => c.type == '광').toList();
+      
+      int playerGwangScore = 0;
+      final hasRainGwang = playerGwangCards.any((c) => c.month == 12);
+      if (playerGwangCards.length == 3) {
+        playerGwangScore = hasRainGwang ? 2 : 3;
+      } else if (playerGwangCards.length == 4) {
+        playerGwangScore = 4;
+      } else if (playerGwangCards.length >= 5) {
+        playerGwangScore = 15;
+      }
+      
+      // 광박 조건: 플레이어가 광 점수를 얻었고, 상대방이 광 0장
+      if (playerGwangScore > 0 && opponentGwangCards.isEmpty) {
+        gwangBakPlayers.add(opponent);
+        logger.addLog(opponent, 'turnEnd', LogLevel.info, 
+          '광박 발생: 플레이어 $opponent (광 0장) - 플레이어 $player 광 점수: $playerGwangScore'
+        );
+      }
+      
+      // ── 멍박 체크 ──
+      // 플레이어의 동물 점수 계산
+      final playerAnimalCards = playerCaptured.where((c) => c.type == '동물' || c.type == '오').toList();
+      final opponentAnimalCards = opponentCaptured.where((c) => c.type == '동물' || c.type == '오').toList();
+      
+      int playerAnimalScore = 0;
+      if (playerAnimalCards.length >= 5) {
+        playerAnimalScore = playerAnimalCards.length - 4;
+      }
+      
+      // 멍박 조건: 플레이어가 동물 점수를 얻었고, 상대방이 동물 7장 미만
+      if (playerAnimalScore > 0 && opponentAnimalCards.length < 7) {
+        mungBakPlayers.add(opponent);
+        logger.addLog(opponent, 'turnEnd', LogLevel.info, 
+          '멍박 발생: 플레이어 $opponent (동물 ${opponentAnimalCards.length}장) - 플레이어 $player 동물 점수: $playerAnimalScore'
+        );
+      }
+    }
   }
 }

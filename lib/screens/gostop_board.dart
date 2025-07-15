@@ -32,7 +32,12 @@ Widget overlappedCardStack(List<String> images, {bool showBadge = false, double 
       for (int i = 0; i < images.length; i++)
         Positioned(
           left: i * overlapX, // 겹치는 정도 비율 적용
-          child: CardWidget(imageUrl: images[i], width: cardWidth, height: cardHeight),
+          child: CardWidget(
+            key: ValueKey('${images[i]}_$i'), // 중복 이미지 대비 index 포함 고유 Key
+            imageUrl: images[i],
+            width: cardWidth,
+            height: cardHeight,
+          ),
         ),
       if (showBadge && badgeCount != null && images.isNotEmpty)
         Positioned(
@@ -75,53 +80,146 @@ String getTypeLabel(BuildContext context, String type) {
   }
 }
 
-Widget capturedOverlapRow(BuildContext context, Map<String, List<String>> captured, {bool isPlayer = true, Map<String, GlobalKey>? capturedKeys}) {
-  final order = ['광', '끗', '띠', '피'];
-  final screenWidth = WidgetsBinding.instance.window.physicalSize.width / WidgetsBinding.instance.window.devicePixelRatio;
-  final screenHeight = WidgetsBinding.instance.window.physicalSize.height / WidgetsBinding.instance.window.devicePixelRatio;
+Widget capturedOverlapRow(BuildContext context, Map<String, List<String>> captured,
+    {bool isPlayer = true, Map<String, GlobalKey>? capturedKeys}) {
+  const order = ['광', '끗', '띠', '피'];
+  const int maxPerRow = 5;
+
+  final screenWidth = WidgetsBinding.instance.window.physicalSize.width /
+      WidgetsBinding.instance.window.devicePixelRatio;
+  final screenHeight = WidgetsBinding.instance.window.physicalSize.height /
+      WidgetsBinding.instance.window.devicePixelRatio;
   final minSide = screenWidth < screenHeight ? screenWidth : screenHeight;
   final cardWidth = minSide * 0.0455;
   final cardHeight = cardWidth * 1.5;
   final overlapX = cardWidth * 0.45;
-  return Row(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      for (final type in order) ...[
-        // 모든 영역(광, 동물, 띠, 피) 라벨을 첫 카드 위에 좌측정렬
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start, // 모든 영역 좌측 정렬
-          children: [
-            Padding(
-              padding: EdgeInsets.only(left: 2), // 필요시 미세 조정
-              child: Text(getTypeLabel(context, type), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: cardHeight * 0.19)),
+  final fixedWidth = cardWidth + overlapX * (maxPerRow - 1);
+  final rowGap = cardHeight * 0.6;
+
+  // 피 점수 계산 함수 (일반피=1, 쌍피=2, 쓰리피=3, 보너스 포함)
+  int _calculatePiScore(List<String> piCards) {
+    int totalScore = 0;
+    for (final cardPath in piCards) {
+      if (cardPath.contains('bonus_3pi') || (cardPath.contains('3pi') && cardPath.contains('bonus'))) {
+        totalScore += 3; // 보너스 쓰리피
+      } else if (cardPath.contains('bonus_ssangpi') || (cardPath.contains('ssangpi') && cardPath.contains('bonus'))) {
+        totalScore += 2; // 보너스 쌍피
+      } else if (cardPath.contains('3pi')) {
+        totalScore += 3; // 쓰리피
+      } else if (cardPath.contains('ssangpi')) {
+        totalScore += 2; // 쌍피
+      } else {
+        totalScore += 1; // 일반피
+      }
+    }
+    return totalScore;
+  }
+
+  Widget buildStack(List<String> list, {bool showBadge = false, Key? stackKey}) {
+    final rows = ((list.length - 1) ~/ maxPerRow) + 1;
+    return SizedBox(
+      key: stackKey,
+      width: fixedWidth,
+      height: cardHeight + (rows - 1) * rowGap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (int idx = 0; idx < list.length; idx++)
+            Positioned(
+              left: (idx % maxPerRow) * overlapX,
+              top: (idx ~/ maxPerRow) * rowGap,
+              child: Image.asset(
+                list[idx],
+                width: cardWidth,
+                height: cardHeight,
+                fit: BoxFit.contain,
+              ),
             ),
-            if (type == '피')
-              // 피 카드도 다른 카드와 동일하게 단순한 겹침 구조로 처리 (UI 렌더링 문제 해결)
-              SizedBox(
-                key: capturedKeys?[type],
-                width: (captured[type]?.length ?? 0) * overlapX + cardWidth,
-                height: cardHeight,
-                child: overlappedCardStack(
-                  captured[type] ?? [],
-                  showBadge: true, // 피 점수 뱃지 표시
-                  cardWidth: cardWidth,
-                  cardHeight: cardHeight,
-                  overlapX: overlapX,
+          if (showBadge && list.isNotEmpty)
+            Positioned(
+              right: 0,
+              top: -6,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              )
-            else
-              SizedBox(
-                key: capturedKeys?[type == '끗' ? '동물' : type],
-                width: ((type == '끗' ? captured['동물'] : captured[type])?.length ?? 0) * overlapX + cardWidth,
-                height: cardHeight,
-                child: overlappedCardStack(
-                  type == '끗' ? (captured['동물'] ?? []) : (captured[type] ?? []),
-                  showBadge: type == '피',
-                  cardWidth: cardWidth,
-                  cardHeight: cardHeight,
-                  overlapX: overlapX,
+                child: Text(
+                  '${_calculatePiScore(list)}',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: cardHeight * 0.22,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  return Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (final type in order) ...[
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: Text(
+                    getTypeLabel(context, type),
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: cardHeight * 0.19),
+                  ),
+                ),
+                if (type == '피') ...[
+                  SizedBox(width: cardWidth * 0.3),
+                  Builder(builder: (context) {
+                    List<String> list = captured[type] ?? [];
+                    if (list.isNotEmpty) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${_calculatePiScore(list)}',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: cardHeight * 0.19,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  }),
+                ],
+              ],
+            ),
+            Builder(builder: (context) {
+              List<String> list;
+              if (type == '끗') {
+                list = captured['동물'] ?? [];
+              } else {
+                list = captured[type] ?? [];
+              }
+              final keyName = type == '끗' ? '동물' : type;
+              return buildStack(list,
+                  showBadge: false, // 피는 라벨 옆에 표시하므로 뱃지 제거
+                  stackKey: capturedKeys?[keyName]);
+            }),
           ],
         ),
         SizedBox(width: cardWidth * 0.9),
@@ -288,6 +386,8 @@ class GoStopBoard extends StatefulWidget {
   final GoStopCard? bonusCard; // 카드더미에서 깐 보너스피
   // engine 인스턴스 직접 전달
   final dynamic engine;
+  // 플레이어가 직접 GO/STOP 선택해야 할 때 자동 호출을 막기 위한 플래그
+  final bool autoGoStop; // true: onGo 콜백을 자동 실행, false: 사용자가 직접 눌러야 함
 
   const GoStopBoard({
     super.key,
@@ -307,6 +407,7 @@ class GoStopBoard extends StatefulWidget {
     this.lastCapturedIndex,
     required this.opponentHandCount,
     required this.isGoStopPhase,
+    this.autoGoStop = false,
     this.playedCard,
     this.capturedCards,
     this.onGo,
@@ -578,12 +679,18 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
                       Positioned(
                         left: j * (cardWidth * 0.3),
                         top: j * (cardHeight * 0.11),
-                        child: CardWidget(
-                          key: j == 0 ? emptyGroupKeys[cardIdx] : UniqueKey(),
-                          imageUrl: cards[j].imageUrl,
-                          width: cardWidth,
-                          height: cardHeight,
-                        ),
+                        child: (() {
+                          // 한글 주석: 겹침 카드의 GlobalKey를 fieldCardKeys 맵에 저장하여 애니메이션에서 실제 위치를 계산할 수 있도록 함
+                          // 두 번째 이후 겹침 카드에도 GlobalKey를 사용해 타입 불일치(TypeError) 방지
+                          final key = j == 0 ? emptyGroupKeys[cardIdx] : GlobalKey();
+                          fieldCardKeys[cards[j].id.toString()] = key;
+                          return CardWidget(
+                            key: key,
+                            imageUrl: cards[j].imageUrl,
+                            width: cardWidth,
+                            height: cardHeight,
+                          );
+                        })(),
                       ),
                   ],
                 ),
@@ -694,8 +801,21 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   // ================================
   // game_page.dart에서 참조하는 Key 헬퍼 메서드
   // ================================
-  // 손패(index) → GlobalKey (현재는 저장하지 않으므로 null 반환)
-  GlobalKey? getHandCardKey(int index) => null;
+  // 손패(index) → GlobalKey
+  GlobalKey? getHandCardKey(int index) {
+    return handCardKeys[index];
+  }
+
+  // 손패 카드 id(String) → GlobalKey
+  GlobalKey? getHandCardKeyById(String cardId) {
+    for (final entry in handCardKeys.entries) {
+      final idx = entry.key;
+      if (idx < widget.playerHand.length && widget.playerHand[idx].id.toString() == cardId) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
 
   // 월 그룹(index) → GlobalKey (emptyGroupKeys에 저장된 키를 GlobalKey로 캐스팅)
   GlobalKey? getFieldGroupKey(int groupIndex) {
@@ -832,7 +952,8 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
                 children: [
                   ...List.generate(cards.length, (j) {
                     final cardKey = j == 0 ? key : UniqueKey();
-                    if (j == 0) fieldCardKeys[cards[j].id.toString()] = cardKey;
+                    // 모든 카드의 id → key 매핑 저장 (겹침 애니메이션 좌표 계산용)
+                    fieldCardKeys[cards[j].id.toString()] = cardKey;
                     return Positioned(
                       left: j * (fieldCardWidth * 0.375),
                       top: j * (fieldCardHeight * 0.111),
@@ -1151,8 +1272,9 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     return SizedBox.expand(
       child: Container(
         alignment: Alignment.topLeft,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
+        child: FittedBox(
+          alignment: Alignment.topLeft,
+          fit: BoxFit.scaleDown, // 공간을 초과하면 자동 축소
           child: capturedOverlapRow(context, captured, isPlayer: isPlayer, capturedKeys: capturedKeys),
         ),
       ),
@@ -1414,37 +1536,40 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           for (int i = 0; i < widget.playerHand.length; i++)
-            Padding(
-              padding: EdgeInsets.only(right: i == widget.playerHand.length - 1 ? 0 : cardW * 0.08),
-              child: Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.topCenter,
-                children: [
-                  // 먹을 수 있는 카드에 화살표 표시
-                  if (widget.highlightHandIndexes.contains(i))
-                    Positioned(
-                      top: -cardH * 0.17,
-                      child: Icon(Icons.arrow_drop_down, color: Colors.orange, size: cardH * 0.28),
+            (() {
+              final globalKey = handCardKeys.putIfAbsent(i, () => GlobalKey());
+              return Padding(
+                padding: EdgeInsets.only(right: i == widget.playerHand.length - 1 ? 0 : cardW * 0.08),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.topCenter,
+                  children: [
+                    // 먹을 수 있는 카드에 화살표 표시
+                    if (widget.highlightHandIndexes.contains(i))
+                      Positioned(
+                        top: -cardH * 0.17,
+                        child: Icon(Icons.arrow_drop_down, color: Colors.orange, size: cardH * 0.28),
+                      ),
+                    GestureDetector(
+                      onTap: () => _onHandCardTap(i),
+                      child: CardWidget(
+                        key: globalKey,
+                        imageUrl: widget.playerHand[i].imageUrl,
+                        width: cardW,
+                        height: cardH,
+                        dimmed: !widget.highlightHandIndexes.contains(i),
+                        // 폭탄 조건(같은 월 3장+필드 1장 이상)만 bombHighlight 적용
+                        bombHighlight: bombIndexes.contains(i),
+                        // 뻑 완성(필드에 3장 쌓인 월+내 손패에 해당 월)만 ppeokHighlight 적용 (폭탄과 중복 시 폭탄 우선)
+                        ppeokHighlight: !bombIndexes.contains(i) && ppeokIndexes.contains(i),
+                        // 보너스 손패(이미지 파일명에 bonus 포함)만 bonusHighlight 적용 (폭탄/뻑과 중복 시 우선순위 적용)
+                        bonusHighlight: !bombIndexes.contains(i) && !ppeokIndexes.contains(i) && bonusIndexes.contains(i),
+                      ),
                     ),
-                  GestureDetector(
-                    onTap: () => _onHandCardTap(i),
-                    child: CardWidget(
-                      key: handCardKeys[i],
-                      imageUrl: widget.playerHand[i].imageUrl,
-                      width: cardW,
-                      height: cardH,
-                      dimmed: !widget.highlightHandIndexes.contains(i),
-                      // 폭탄 조건(같은 월 3장+필드 1장 이상)만 bombHighlight 적용
-                      bombHighlight: bombIndexes.contains(i),
-                      // 뻑 완성(필드에 3장 쌓인 월+내 손패에 해당 월)만 ppeokHighlight 적용 (폭탄과 중복 시 폭탄 우선)
-                      ppeokHighlight: !bombIndexes.contains(i) && ppeokIndexes.contains(i),
-                      // 보너스 손패(이미지 파일명에 bonus 포함)만 bonusHighlight 적용 (폭탄/뻑과 중복 시 우선순위 적용)
-                      bonusHighlight: !bombIndexes.contains(i) && !ppeokIndexes.contains(i) && bonusIndexes.contains(i),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                  ],
+                ),
+              );
+            })(),
         ],
       ),
     );
@@ -1456,7 +1581,7 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     final screenHeight = MediaQuery.of(context).size.height;
     final minSide = screenWidth < screenHeight ? screenWidth : screenHeight;
     final fieldPanelHeight = screenHeight - (minSide * 0.19) - (minSide * 0.10);
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: const Color(0xFF2f4f2f),
       body: Column(
         children: [
@@ -1474,16 +1599,15 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
         ],
       ),
     );
+
     // 7점 이상일 때 자동으로 GO/STOP 선택창 띄우기 (한 번만)
-    if (widget.isGoStopPhase && widget.onGo != null && !_goStopDialogShown) {
+    if (widget.isGoStopPhase && widget.onGo != null && !_goStopDialogShown && widget.autoGoStop) {
       _goStopDialogShown = true;
-      // 프레임이 끝난 뒤에 다이얼로그 띄우기 (build 중 호출 방지)
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        widget.onGo!();
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => widget.onGo!());
     } else if (!widget.isGoStopPhase && _goStopDialogShown) {
-      // GO/STOP 상태가 해제되면 플래그 초기화
       _goStopDialogShown = false;
     }
+
+    return scaffold;
   }
 }

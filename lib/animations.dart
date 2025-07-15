@@ -1241,3 +1241,81 @@ class _CardPlayAnimationState extends State<CardPlayAnimation>
     );
   }
 } 
+
+// 간단한 카드 이동 애니메이션 (직선 이동, 크기 변화 없음, 바운스 없음)
+class SimpleCardMoveAnimation extends StatefulWidget {
+  final String cardImage;
+  final Offset startPosition;
+  final Offset endPosition;
+  final VoidCallback? onComplete;
+  final Duration duration;
+  // 카드 크기(획득 영역과 동일 크기로 맞춤)
+  final double cardWidth;
+  final double cardHeight;
+
+  const SimpleCardMoveAnimation({
+    super.key,
+    required this.cardImage,
+    required this.startPosition,
+    required this.endPosition,
+    this.onComplete,
+    this.duration = const Duration(milliseconds: 500),
+    this.cardWidth = 48,
+    this.cardHeight = 72,
+  });
+
+  @override
+  State<SimpleCardMoveAnimation> createState() => _SimpleCardMoveAnimationState();
+}
+
+class _SimpleCardMoveAnimationState extends State<SimpleCardMoveAnimation>
+    with TickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _moveAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: widget.duration,
+      vsync: this,
+    );
+
+    // 직선 이동 애니메이션
+    _moveAnimation = Tween<Offset>(
+      begin: widget.startPosition,
+      end: widget.endPosition,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut, // 자연스러운 직선 이동
+    ));
+
+    _controller.forward().then((_) {
+      widget.onComplete?.call();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: _moveAnimation.value,
+          child: Image.asset(
+            widget.cardImage,
+            width: widget.cardWidth,
+            height: widget.cardHeight,
+            fit: BoxFit.contain,
+          ),
+        );
+      },
+    );
+  }
+} 
