@@ -39,6 +39,7 @@ class MatgoEngine {
   int currentPlayer = 1;
   int goCount = 0;
   int? goPlayer; // GO를 선언한 플레이어
+  int? lastGoScore; // 마지막 GO 선언 시점의 점수
   String? winner;
   bool gameOver = false;
   final EventEvaluator eventEvaluator = EventEvaluator();
@@ -116,6 +117,7 @@ class MatgoEngine {
     gwangBakPlayers.clear();
     mungBakPlayers.clear();
     nagariCount = 0;
+    lastGoScore = null; // GO 점수 초기화
   }
 
   // 동일 월 카드가 3장 이상 손패에 있으면 흔들 조건 충족으로 간주
@@ -975,25 +977,57 @@ class MatgoEngine {
     // 쓸(Sseul) 조건 체크 및 처리
     _handleSseul();
 
-    // 상태 초기화
-    pendingCaptured.clear();
-    playedCard = null;
-    drawnCard = null;
-    bonusOverlayCards.clear();
-
-    // [고스톱 규칙] 점수 계산 후 7점 이상이면 GO/STOP 판정
+    // [고스톱 규칙] 점수 계산 후 7점 이상이면 GO/STOP 판정 또는 역GO 즉시 종료
     if (_checkVictoryCondition()) {
+      // 역GO 등으로 gameOver 가 이미 true 인 경우 → 즉시 게임 종료 처리
+      if (gameOver) {
+        _processFinalBakJudgment();
+        onTurnEnd?.call();
+        return; // 추가 로직 없이 종료
+      }
+
       logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '승리 조건 충족: 고/스톱 선택 대기');
-      awaitingGoStop = true;
-      currentPhase = TurnPhase.turnEnd;
-      // 턴을 넘기지 않고 '고/스톱' 결정을 기다림
-      return;
+
+      // 손패에 카드가 남아 있으면 GO/STOP 다이얼로그 표시, 없으면 자동 STOP
+      if (getHand(currentPlayer).isEmpty) {
+        awaitingGoStop = true; // declareStop 내부에서 검사하므로 true 유지
+        declareStop();
+        onTurnEnd?.call();
+      } else {
+        awaitingGoStop = true;
+        currentPhase = TurnPhase.turnEnd;
+        onTurnEnd?.call();
+      }
+      return; // GO/STOP 대기 또는 STOP 처리 후 종료
     }
 
     // 게임 종료 시 최종 박 판정 처리
     if (gameOver) {
       _processFinalBakJudgment();
     }
+
+    // --- 손패 모두 소진 시 자동 종료 처리 ---
+    if (!gameOver && getHand(1).isEmpty && getHand(2).isEmpty) {
+      _processFinalBakJudgment();
+      final int s1 = calculateScore(1);
+      final int s2 = calculateScore(2);
+      if (s1 == s2) {
+        winner = null; // 무승부 (추후 확장 가능)
+      } else {
+        winner = s1 > s2 ? 'player1' : 'player2';
+      }
+      gameOver = true;
+      currentPhase = TurnPhase.turnEnd;
+      logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, '손패 소진으로 자동 종료 (P1:$s1, P2:$s2, winner:$winner)');
+      onTurnEnd?.call();
+      return;
+    }
+
+    // --- 상태 초기화 (승리 조건 체크 이후) ---
+    pendingCaptured.clear();
+    playedCard = null;
+    drawnCard = null;
+    bonusOverlayCards.clear();
 
     // 다음 플레이어로 턴 넘김
     final nextPlayer = (currentPlayer % 2) + 1;
@@ -1016,29 +1050,44 @@ class MatgoEngine {
   bool _checkVictoryCondition() {
     final score = calculateBaseScore(currentPlayer);
     
-    // 3. goCount > 0 상태에서 상대가 7점↑ 달성(역GO) ⇒ winner = opponent ; gameOver = true ; GO/STOP 배수는 무시한다.
-    if (goCount > 0) {
-      final opponent = (currentPlayer % 2) + 1;
-      final opponentScore = calculateBaseScore(opponent);
-      if (opponentScore >= 7) {
-        // 역GO: 상대방이 승리 (박 판정은 GO/STOP 선택 후에 처리)
-        winner = 'player$opponent';
+    // 1) 역GO 판정: GO 상태에서 상대가 7점 이상 달성
+    if (goCount > 0 && currentPlayer != (goPlayer ?? -1)) {
+      if (score >= 7) {
+        winner = 'player$currentPlayer';
         gameOver = true;
-        logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, 
-          '역GO 발생: 상대방 $opponent이 7점 달성으로 승리 (현재 플레이어: $currentPlayer, goCount: $goCount)'
-        );
+        logger.addLog(currentPlayer, 'turnEnd', LogLevel.info,
+            '역GO 발생: 플레이어 $currentPlayer이 7점 달성으로 승리 (goCount: $goCount, goPlayer: $goPlayer)');
         return true;
       }
     }
-    
-    // 맞고는 7점부터 (박 판정은 GO/STOP 선택 후에 처리)
-    if (score >= 7) {
-      logger.addLog(currentPlayer, 'turnEnd', LogLevel.info, 
-        '7점 이상 달성: GO/STOP 선택 대기 (점수: $score)'
-      );
-      return true;
+
+    // 2) GO 선언자 자신의 추가 점수 판정
+    if (currentPlayer == (goPlayer ?? -1)) {
+      if (goCount == 0) {
+        // 최초 7점 달성
+        if (score >= 7) {
+          logger.addLog(currentPlayer, 'turnEnd', LogLevel.info,
+              '7점 이상 달성: GO/STOP 선택 대기 (점수: $score)');
+          return true;
+        }
+      } else {
+        // 이미 GO 상태 → 이전보다 1점 이상 상승 여부 확인
+        final int prevScore = (lastGoScore ?? 7);
+        if (score >= prevScore + 1) {
+          logger.addLog(currentPlayer, 'turnEnd', LogLevel.info,
+              '점수 상승(${prevScore}→$score): GO/STOP 선택 대기');
+          return true;
+        }
+      }
+    } else {
+      // goCount == 0 (아직 GO 안 한 상태)에서 다른 플레이어 7점 이상
+      if (goCount == 0 && score >= 7) {
+        logger.addLog(currentPlayer, 'turnEnd', LogLevel.info,
+            '7점 이상 달성: GO/STOP 선택 대기 (점수: $score)');
+        return true;
+      }
     }
-    
+
     return false;
   }
 
@@ -1046,6 +1095,8 @@ class MatgoEngine {
     if (!awaitingGoStop) return;
     goCount++;
     goPlayer = currentPlayer; // GO를 선언한 플레이어 설정
+    // GO 선언 시점의 점수를 기록하여 다음 턴에서 비교
+    lastGoScore = calculateBaseScore(goPlayer!);
     awaitingGoStop = false;
     
     // GO 선언 후 상대방 턴으로 전환

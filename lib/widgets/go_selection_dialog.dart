@@ -422,22 +422,16 @@ class _GoSelectionDialogState extends State<GoSelectionDialog>
     }
   }
 
+  // GO 보너스는 engine.mdc 규칙을 따른다.
+  // 1GO(+1), 2GO(+2), 3GO 이상은 +점수 없이 배수(×2) 적용.
   double _getNextGoBonus() {
     switch (widget.currentGoCount) {
-      case 1:
+      case 0: // 아직 GO 선언 전 → 첫 GO
+        return 1.0;
+      case 1: // 1GO 상태 → 두 번째 GO
         return 2.0;
-      case 2:
-        return 3.0;
-      case 3:
-        return 4.0;
-      case 4:
-        return 5.0;
-      case 5:
-        return 6.0;
-      case 6:
-        return 7.0;
       default:
-        return 2.0;
+        return 0.0; // 3GO 이상부터는 +점수 대신 배수 적용
     }
   }
 } 

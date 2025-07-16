@@ -78,11 +78,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       _displayOpponentScore = engine.calculateBaseScore(2);
     });
     
-    // GO/STOP 조건 즉시 확인
-    if ((_displayPlayerScore >= 7 || _displayOpponentScore >= 7) && !engine.awaitingGoStop) {
-      engine.awaitingGoStop = true;
-      setState(() {}); // UI 업데이트로 GO/STOP 버튼 활성화
-    }
+    // 점수 표시만 갱신하고, GO/STOP 여부는 엔진에서 결정한 awaitingGoStop 값만 신뢰한다.
   }
 
   @override
@@ -98,25 +94,57 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     engine.setAnimationListener(_handleAnimationEvent);
     
     // 턴 종료 후 UI 업데이트 콜백 설정
-    engine.onTurnEnd = () {
+    engine.onTurnEnd = () async {
+      // ── 점수 및 GO/STOP 상태 즉시 반영 ──
+      _updateScoresAndCheckGoStop();
       // ── 실시간 박 상태 체크 (광박/피박/멍박) ──
       engine.checkBakConditions();
       
-      // ── GO/STOP 대기 상태인지 확인 ──
-      final currentPlayerScore = engine.calculateBaseScore(1);
-      final currentAiScore = engine.calculateBaseScore(2);
-      if ((currentPlayerScore >= 7 || currentAiScore >= 7) && !engine.awaitingGoStop) {
-        engine.awaitingGoStop = true;
-        setState(() {}); // UI 업데이트로 GO/STOP 버튼 활성화
-        return; // GO/STOP 대기 상태에서는 AI 턴 시작하지 않음
+      // ── 플레이어(나) 7점 이상 달성 → 즉시 GO/STOP 다이얼로그 표시 ──
+      if (engine.awaitingGoStop && engine.currentPlayer == 1) {
+        // 이미 다른 다이얼로그가 떠 있지 않을 때만 실행
+        _showGoStopSelectionDialog().then((isGo) async {
+          if (isGo == true) {
+            // 게임 상태를 먼저 업데이트한 후, GO 애니메이션 실행
+            setState(() => engine.declareGo());
+            await _showGoAnimation(engine.goCount); // 증가된 goCount 반영
+            _runAiTurnIfNeeded();
+          } else if (isGo == false) {
+            setState(() => engine.declareStop());
+            _showGameOverDialog();
+          }
+        });
+        return; // 다이얼로그 뜨면 AI 턴 대기
+      }
+      
+      // ── AI 7점 이상 달성 시 자동 GO/STOP 결정 ──
+      if (engine.awaitingGoStop && engine.currentPlayer == 2) {
+        final int aiScore = engine.calculateBaseScore(2);
+        final int playerScore = engine.calculateBaseScore(1);
+        bool aiWillGo;
+        // 간단 로직: 10점 미만이거나 플레이어보다 점수 차가 3점 이하이면 GO, 아니면 STOP
+        if (aiScore < 10 && (aiScore - playerScore) <= 3) {
+          aiWillGo = true;
+        } else {
+          aiWillGo = false;
+        }
+
+        if (aiWillGo) {
+          setState(() => engine.declareGo());
+          await _showGoAnimation(engine.goCount);
+        } else {
+          setState(() => engine.declareStop());
+          _showGameOverDialog();
+        }
+        // AI 턴이 끝나면 onTurnEnd 콜백에서 자동으로 다음 턴 처리됨
       }
       
       // ── GO/STOP 대기 상태가 아닐 때만 AI 턴 시작 ──
       if (engine.currentPlayer == 2 && !engine.isGameOver() && !engine.awaitingGoStop) {
         // 추가 안전장치: 점수 재확인
-        final finalPlayerScore = engine.calculateBaseScore(1);
-        final finalAiScore = engine.calculateBaseScore(2);
-        if (finalPlayerScore < 7 && finalAiScore < 7) {
+        final int pScore = engine.calculateBaseScore(1);
+        final int aiScore = engine.calculateBaseScore(2);
+        if (pScore < 7 && aiScore < 7) {
           _runAiTurnIfNeeded();
         }
       }
@@ -982,8 +1010,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         
         if (shouldGo) {
           // AI가 GO를 선택하여 게임을 계속
-          await _showGoAnimation(engine.goCount + 1);
           setState(() => engine.declareGo());
+          await _showGoAnimation(engine.goCount);
           // ── GO/STOP 대기 상태 해제 ──
           engine.awaitingGoStop = false;
           // GO 선언 후 AI 턴이 계속되므로 재귀 호출
@@ -1761,8 +1789,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                     print('🤖 AI GO/STOP 자동 판단: $aiScore점 → ${shouldGo ? 'GO' : 'STOP'}');
                     
                     if (shouldGo) {
-                      await _showGoAnimation(engine.goCount + 1);
                       setState(() => engine.declareGo());
+                      await _showGoAnimation(engine.goCount);
                       engine.awaitingGoStop = false;
                       _runAiTurnIfNeeded();
                     } else {
@@ -1783,8 +1811,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                   print('👤 플레이어 GO/STOP 선택 다이얼로그 표시');
                   final isGo = await _showGoStopSelectionDialog();
                   if (isGo == true) {
-                    await _showGoAnimation(engine.goCount + 1);
                     setState(() => engine.declareGo());
+                    await _showGoAnimation(engine.goCount);
                     engine.awaitingGoStop = false;
                     _runAiTurnIfNeeded();
                   } else if (isGo == false) {
@@ -1888,35 +1916,35 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
             //   ),
             // ),
 
-            // 흔들 상태 표시
-            if (engine.heundalPlayers.isNotEmpty)
-              Positioned(
-                top: 50,
-                right: 20,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange, width: 2),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.whatshot, color: Colors.white, size: 20),
-                      const SizedBox(width: 5),
-                      Text(
-                        AppLocalizations.of(context)!.heundalStatus,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            // 흔들 상태 표시 - 제거: 플레이어 박스 내부에 이미 표시되므로 중복 방지
+            // if (engine.heundalPlayers.isNotEmpty)
+            //   Positioned(
+            //     top: 50,
+            //     right: 20,
+            //     child: Container(
+            //       padding: const EdgeInsets.all(8),
+            //       decoration: BoxDecoration(
+            //         color: Colors.orange.withOpacity(0.9),
+            //         borderRadius: BorderRadius.circular(8),
+            //         border: Border.all(color: Colors.orange, width: 2),
+            //       ),
+            //       child: Row(
+            //         mainAxisSize: MainAxisSize.min,
+            //         children: [
+            //           const Icon(Icons.whatshot, color: Colors.white, size: 20),
+            //           const SizedBox(width: 5),
+            //           Text(
+            //             AppLocalizations.of(context)!.heundalStatus,
+            //             style: const TextStyle(
+            //               color: Colors.white,
+            //               fontSize: 16,
+            //               fontWeight: FontWeight.bold,
+            //             ),
+            //           ),
+            //         ],
+            //       ),
+            //     ),
+            //   ),
 
             // 폭탄 상태 표시 - 제거: 플레이어 박스 내부에 이미 표시되므로 중복 방지
             // if (engine.bombPlayers.isNotEmpty)
@@ -1968,39 +1996,57 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
-  // 보너스피 애니메이션: 카드더미 → 내가 낸 카드 위 겹침
+  // 보너스피 애니메이션: 카드더미에서 "한 번만" 뒤집힌 뒤 곧바로 내가 낸 카드 위로 이동하여 겹침
   void _handleBonusCardAnimation(Map<String, dynamic> data) {
     final GoStopCard card = data['card'] as GoStopCard;
-    final int player = data['player'] as int;
     final Function()? onComplete = data['onComplete'] as Function()?;
 
-    // 시작 좌표: 카드더미 중앙
-    final Offset fromOffset = _getCardPosition('deck', card);
+    // ① 카드더미 위치 (시작)
+    final Offset deckOffset = _getCardPosition('deck', card);
 
-    // 도착 좌표: 내가 방금 낸 카드(playedCard) 위치에 겹침
-    GoStopCard? baseCard = engine.playedCard;
-    if (baseCard == null) return; // 안전
-
-    Offset toOffset = _getCardPosition('field', baseCard);
+    // ② 도착 위치: 방금 낸 카드(playedCard) 위치
+    final GoStopCard? baseCard = engine.playedCard;
+    if (baseCard == null) return; // 방어
+    final Offset targetOffset = _getCardPosition('field', baseCard);
 
     setState(() {
       isAnimating = true;
-      // 보너스피도 카드더미에서 뒤집어서 나오는 완전한 애니메이션 실행
+
+      // 1단계: 제자리 뒤집기 (카드더미 위에서 앞면 확인)
       activeAnimations.add(
         CardFlipMoveAnimation(
           backImage: 'assets/cards/back.png',
           frontImage: card.imageUrl,
-          startPosition: fromOffset,
-          endPosition: toOffset,
+          startPosition: deckOffset,
+          endPosition: deckOffset, // 이동 없음 – 제자리에서 뒤집기만
+          duration: const Duration(milliseconds: 400),
           onComplete: () {
+            // 뒤집기 완료 → 뒤집기 애니메이션 제거
             setState(() {
               activeAnimations.removeWhere((anim) => anim is CardFlipMoveAnimation);
-              if (activeAnimations.isEmpty) isAnimating = false;
             });
-            // 애니메이션 완료 후 엔진에서 전달된 콜백 실행
-            if (onComplete != null) onComplete();
+
+            // 2단계: 이동 애니메이션 (추가 뒤집기 없이 바로 겹침)
+            setState(() {
+              activeAnimations.add(
+                CardMoveAnimation(
+                  cardImage: card.imageUrl,
+                  startPosition: deckOffset,
+                  endPosition: targetOffset,
+                  withTrail: false,
+                  duration: const Duration(milliseconds: 400),
+                  onComplete: () {
+                    setState(() {
+                      activeAnimations.removeWhere((anim) => anim is CardMoveAnimation);
+                      if (activeAnimations.isEmpty) isAnimating = false;
+                    });
+                    // 엔진 콜백 실행 (다음 로직 진행)
+                    if (onComplete != null) onComplete();
+                  },
+                ),
+              );
+            });
           },
-          duration: const Duration(milliseconds: 800),
         ),
       );
     });
