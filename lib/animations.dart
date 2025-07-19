@@ -570,7 +570,7 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
       case 'ppeok':
         // 뻑!: 네모 박스 없이 텍스트만 강조 효과로 표시
         return Text(
-          AppLocalizations.of(context)!.ppeok + '!',
+          '${AppLocalizations.of(context)!.ppeok}!',
           style: const TextStyle(
             color: Colors.red, // 강조 색상
             fontSize: 36, // 크기 키움
@@ -587,7 +587,7 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
       case 'sseul':
         // 쓸: 파란색, 아래에서 위로 슬라이드, 그림자 강조
         return Text(
-          AppLocalizations.of(context)!.sweep + '!',
+          '${AppLocalizations.of(context)!.sweep}!',
           style: const TextStyle(
             color: Colors.blueAccent,
             fontSize: 36,
@@ -626,7 +626,7 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
       case 'ttak':
         // 따닥: 오렌지/노랑, 좌우로 튕기는 느낌, 그림자 강조
         return Text(
-          AppLocalizations.of(context)!.doubleMatch + '!',
+          '${AppLocalizations.of(context)!.doubleMatch}!',
           style: const TextStyle(
             color: Colors.orange,
             fontSize: 36,
@@ -648,7 +648,7 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
       case 'chok':
         // 쪽: 네모 박스 없이 텍스트만 강조
         return Text(
-          AppLocalizations.of(context)!.snap + '!',
+          '${AppLocalizations.of(context)!.snap}!',
           style: const TextStyle(
             color: Colors.blue,
             fontSize: 36,
@@ -670,7 +670,7 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
       case 'godori':
         // 고도리: 네모 박스 없이 텍스트만 강조
         return Text(
-          AppLocalizations.of(context)!.godori + '!',
+          '${AppLocalizations.of(context)!.godori}!',
           style: const TextStyle(
             color: Colors.green,
             fontSize: 36,
@@ -802,7 +802,7 @@ class _SpecialEffectAnimationState extends State<SpecialEffectAnimation>
       case 'heundal':
         // 흔들: 주황+금색, 좌우 크게 흔들리는 느낌
         return Text(
-          AppLocalizations.of(context)!.shake + '!',
+          '${AppLocalizations.of(context)!.shake}!',
           style: const TextStyle(
             color: Colors.orange,
             fontSize: 36,
@@ -1240,7 +1240,134 @@ class _CardPlayAnimationState extends State<CardPlayAnimation>
       },
     );
   }
-} 
+}
+
+// AI 손패 카드 뒤집기 애니메이션
+class AiHandCardAnimation extends StatefulWidget {
+  final String backImage; // 뒷면 이미지
+  final String frontImage; // 앞면 이미지
+  final Offset startPosition;
+  final Offset endPosition;
+  final VoidCallback? onComplete;
+  final Duration duration;
+  final double cardWidth;
+  final double cardHeight;
+
+  const AiHandCardAnimation({
+    super.key,
+    required this.backImage,
+    required this.frontImage,
+    required this.startPosition,
+    required this.endPosition,
+    this.onComplete,
+    this.duration = const Duration(milliseconds: 600),
+    this.cardWidth = 48,
+    this.cardHeight = 72,
+  });
+
+  @override
+  State<AiHandCardAnimation> createState() => _AiHandCardAnimationState();
+}
+
+class _AiHandCardAnimationState extends State<AiHandCardAnimation>
+    with TickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _moveAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _rotationAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: widget.duration,
+      vsync: this,
+    );
+
+    // 이동 애니메이션
+    _moveAnimation = Tween<Offset>(
+      begin: widget.startPosition,
+      end: widget.endPosition,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOutCubic,
+    ));
+
+    // 확대 애니메이션: 시작할 때 약간 확대
+    _scaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.2,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    ));
+
+    // 회전 애니메이션: 카드가 앞면으로 뒤집히는 효과
+    _rotationAnimation = Tween<double>(
+      begin: 0.0,
+      end: 0.5, // 180도 회전 (0.5 = 180도)
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+
+    _controller.forward().then((_) {
+      widget.onComplete?.call();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        // 회전 애니메이션 중간에 카드 이미지 변경 (0.25 = 90도 회전 시점)
+        final isFlipped = _rotationAnimation.value >= 0.25;
+        final cardImage = isFlipped ? widget.frontImage : widget.backImage;
+        
+        return Transform.translate(
+          offset: _moveAnimation.value,
+          child: Transform.scale(
+            scale: _scaleAnimation.value,
+            child: Transform(
+              transform: Matrix4.identity()
+                ..setEntry(3, 2, 0.001) // 원근감
+                ..rotateY(_rotationAnimation.value * 3.14159), // Y축 회전
+              alignment: Alignment.center,
+              child: Container(
+                width: widget.cardWidth,
+                height: widget.cardHeight,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.4),
+                      blurRadius: 12,
+                      offset: const Offset(4, 8),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.asset(
+                    cardImage,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
 // 간단한 카드 이동 애니메이션 (직선 이동, 크기 변화 없음, 바운스 없음)
 class SimpleCardMoveAnimation extends StatefulWidget {

@@ -451,6 +451,9 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   // 손패 카드별 GlobalKey 관리
   final Map<int, GlobalKey> handCardKeys = {};
   
+  // AI 손패 카드별 GlobalKey 관리
+  final Map<int, GlobalKey> aiHandCardKeys = {};
+  
   // 카드더미 위치를 저장할 GlobalKey
   final GlobalKey deckKey = GlobalKey();
   // 12개 그룹용 빈자리 GlobalKey
@@ -471,6 +474,32 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     '동물': GlobalKey(),
     '피': GlobalKey(),
   };
+  
+  // AI 손패 카드 박스 GlobalKey
+  final GlobalKey aiHandBoxKey = GlobalKey();
+  
+  // AI 손패 카드 박스 위치 가져오기
+  GlobalKey? getAiHandBoxKey() {
+    return aiHandBoxKey;
+  }
+  
+  // AI 손패 카드 GlobalKey 가져오기
+  GlobalKey? getAiHandCardKey(int index) {
+    return aiHandCardKeys[index];
+  }
+  
+  // AI 손패 카드 위젯 생성 (애니메이션용)
+  Widget createAiHandCardWidget(int index, {bool isFaceDown = true}) {
+    final cardWidth = 48 * 0.4; // 기존 크기의 40%로 조정
+    final cardHeight = 72 * 0.4; // 기존 크기의 40%로 조정
+    
+    return CardWidget(
+      imageUrl: widget.deckBackImage,
+      isFaceDown: isFaceDown,
+      width: cardWidth,
+      height: cardHeight,
+    );
+  }
 
   void playEatAnimation(int handIndex, int fieldIndex) {
     // 애니메이션 로직은 나중에 구현
@@ -605,16 +634,62 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   }
 
   Widget _opponentHandZone() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(widget.opponentHandCount, (i) =>
-        CardWidget(
-          imageUrl: widget.deckBackImage,
-          isFaceDown: true,
-          width: 48 * 0.2, // 기존 크기의 20%
-          height: 72 * 0.2, // 기존 크기의 20%
-        )
-      ),
+    // AI 손패 카드를 2줄로 배치
+    final cardWidth = 48 * 0.4; // 기존 크기의 40%로 조정
+    final cardHeight = 72 * 0.4; // 기존 크기의 40%로 조정
+    final gap = cardWidth * 0.12; // 가로 간격 조정
+    final verticalGap = cardHeight * 0.15; // 세로 간격 조정
+    
+    // 2줄로 나누기 위한 계산
+    final cardsPerRow = (widget.opponentHandCount / 2).ceil(); // 첫 번째 줄에 올 카드 수
+    final firstRowCards = cardsPerRow;
+    final secondRowCards = widget.opponentHandCount - firstRowCards;
+    
+    // AI 손패 카드 GlobalKey 초기화
+    aiHandCardKeys.clear();
+    for (int i = 0; i < widget.opponentHandCount; i++) {
+      aiHandCardKeys[i] = GlobalKey();
+    }
+    
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 첫 번째 줄
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(firstRowCards, (i) =>
+            Padding(
+              padding: EdgeInsets.only(right: i == firstRowCards - 1 ? 0 : gap),
+              child: CardWidget(
+                key: aiHandCardKeys[i], // AI 손패 카드에 GlobalKey 할당
+                imageUrl: widget.deckBackImage,
+                isFaceDown: true,
+                width: cardWidth,
+                height: cardHeight,
+              ),
+            )
+          ),
+        ),
+        // 두 번째 줄 (카드가 있을 때만)
+        if (secondRowCards > 0) ...[
+          SizedBox(height: verticalGap),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(secondRowCards, (i) =>
+              Padding(
+                padding: EdgeInsets.only(right: i == secondRowCards - 1 ? 0 : gap),
+                child: CardWidget(
+                  key: aiHandCardKeys[firstRowCards + i], // 두 번째 줄 카드에 GlobalKey 할당
+                  imageUrl: widget.deckBackImage,
+                  isFaceDown: true,
+                  width: cardWidth,
+                  height: cardHeight,
+                ),
+              )
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -833,25 +908,56 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     return aiCapturedKeys[type];
   }
 
-  // 상단 AI 카드패를 내 손패와 동일한 간격/크기로 배치하는 함수 추가
+  // 상단 AI 카드패를 2줄로 배치하는 함수
   Widget _opponentHandZoneWithGap(double minSide) {
     // 내 손패와 동일한 비율로 카드 크기/간격 계산
     final cardWidth = minSide * 0.13 * 0.2; // AI 카드패 크기를 20%로 줄임
     final cardHeight = cardWidth * 1.5;
     final gap = cardWidth * 0.08;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.start,
-      children: List.generate(widget.opponentHandCount, (i) =>
-        Padding(
-          padding: EdgeInsets.only(right: i == widget.opponentHandCount - 1 ? 0 : gap),
-          child: CardWidget(
-            imageUrl: widget.deckBackImage,
-            isFaceDown: true,
-            width: cardWidth,
-            height: cardHeight,
+    final verticalGap = cardHeight * 0.1; // 세로 간격
+    
+    // 2줄로 나누기 위한 계산
+    final cardsPerRow = (widget.opponentHandCount / 2).ceil(); // 첫 번째 줄에 올 카드 수
+    final firstRowCards = cardsPerRow;
+    final secondRowCards = widget.opponentHandCount - firstRowCards;
+    
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 첫 번째 줄
+        Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: List.generate(firstRowCards, (i) =>
+            Padding(
+              padding: EdgeInsets.only(right: i == firstRowCards - 1 ? 0 : gap),
+              child: CardWidget(
+                imageUrl: widget.deckBackImage,
+                isFaceDown: true,
+                width: cardWidth,
+                height: cardHeight,
+              ),
+            )
           ),
-        )
-      ),
+        ),
+        // 두 번째 줄 (카드가 있을 때만)
+        if (secondRowCards > 0) ...[
+          SizedBox(height: verticalGap),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: List.generate(secondRowCards, (i) =>
+              Padding(
+                padding: EdgeInsets.only(right: i == secondRowCards - 1 ? 0 : gap),
+                child: CardWidget(
+                  imageUrl: widget.deckBackImage,
+                  isFaceDown: true,
+                  width: cardWidth,
+                  height: cardHeight,
+                ),
+              )
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1253,6 +1359,8 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
                   iconSize: (iconSize ?? minSide * 0.022) * 1.5,
                   coinFontSize: (coinFontSize ?? minSide * 0.022) * 1.5,
                   levelFontSize: (levelFontSize ?? minSide * 0.022) * 1.5,
+                  handCards: isOpponent ? _opponentHandZone() : null, // AI일 때만 손패 카드 전달
+                  handCardsKey: isOpponent ? aiHandBoxKey : null, // AI일 때만 GlobalKey 전달
                 ),
               ),
             ),
