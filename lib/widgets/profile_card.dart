@@ -13,6 +13,8 @@ class ProfileCard extends StatelessWidget {
   final double? iconSize;
   final double? coinFontSize;
   final double? levelFontSize;
+  final Widget? handCards; // AI 손패 카드 위젯 추가
+  final GlobalKey? handCardsKey; // AI 손패 카드 박스 GlobalKey
   const ProfileCard({
     super.key,
     required this.avatarUrl,
@@ -26,6 +28,8 @@ class ProfileCard extends StatelessWidget {
     this.iconSize,
     this.coinFontSize,
     this.levelFontSize,
+    this.handCards, // AI 손패 카드 위젯 추가
+    this.handCardsKey, // AI 손패 카드 박스 GlobalKey
   });
 
   @override
@@ -64,99 +68,220 @@ class ProfileCard extends StatelessWidget {
             color: Colors.black.withOpacity(0.4),
             borderRadius: BorderRadius.circular(cardHeight * 0.17),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.max,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1행: 프로필사진 + 닉네임
-              Row(
+          child: handCards != null 
+            ? Row(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: avatar / 2,
-                    backgroundColor: Colors.grey.shade800,
-                    child: ClipOval(
-                      child: Image.asset(
-                        avatarUrl,
-                        width: avatar,
-                        height: avatar,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stack) => Icon(Icons.person, color: Colors.white, size: icon),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: cardHeight * 0.09),
-                  Text(
-                    nickname,
-                    style: TextStyle(
-                      fontSize: mainFont,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  ),
-                ],
-              ),
-              // 2행: 코인 상태창 (아래쪽에 딱 붙게)
-              if (!(nickname.toLowerCase().startsWith('ai')))
-                Padding(
-                  padding: EdgeInsets.only(top: isExpand ? 2 : cardHeight * 0.07),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isExpand ? 6 : cardHeight * 0.06,
-                      vertical: isExpand ? 2 : cardHeight * 0.025
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(cardHeight * 0.115),
-                      border: Border.all(color: Colors.amberAccent, width: 0.5),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.amberAccent.withOpacity(0.7),
-                          blurRadius: 8,
-                          spreadRadius: 1,
+                  // AI 프로필 정보 (왼쪽) - 내 프로필박스와 동일한 위치
+                  Expanded(
+                    flex: 1,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.max,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 1행: 프로필사진 + 닉네임
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            CircleAvatar(
+                              radius: avatar / 2,
+                              backgroundColor: Colors.grey.shade800,
+                              child: ClipOval(
+                                child: Image.asset(
+                                  avatarUrl,
+                                  width: avatar,
+                                  height: avatar,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stack) => Icon(Icons.person, color: Colors.white, size: icon),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: cardHeight * 0.09),
+                            Text(
+                              nickname,
+                              style: TextStyle(
+                                fontSize: mainFont,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ],
                         ),
+                        // 2행: 코인 상태창 (아래쪽에 딱 붙게)
+                        if (!(nickname.toLowerCase().startsWith('ai')))
+                          Padding(
+                            padding: EdgeInsets.only(top: isExpand ? 2 : cardHeight * 0.07),
+                            child: Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isExpand ? 6 : cardHeight * 0.06,
+                                vertical: isExpand ? 2 : cardHeight * 0.025
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(cardHeight * 0.115),
+                                border: Border.all(color: Colors.amberAccent, width: 0.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.amberAccent.withOpacity(0.7),
+                                    blurRadius: 8,
+                                    spreadRadius: 1,
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Image.asset('assets/icons/coin.png', width: icon, height: icon),
+                                      Shimmer.fromColors(
+                                        baseColor: Colors.transparent,
+                                        highlightColor: Colors.white.withOpacity(0.7),
+                                        period: const Duration(seconds: 2),
+                                        child: Image.asset(
+                                          'assets/icons/coin.png',
+                                          width: icon,
+                                          height: icon,
+                                          color: Colors.white,
+                                          colorBlendMode: BlendMode.srcATop,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  SizedBox(width: isExpand ? 4 : cardHeight * 0.025),
+                                  Text(
+                                    '$coins',
+                                    style: TextStyle(
+                                      color: Colors.amberAccent,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: coinFont
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                       ],
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Stack(
-                          alignment: Alignment.center,
+                  ),
+                  SizedBox(width: cardHeight * 0.05),
+                  // AI 손패 카드들 (오른쪽) - 새로운 박스로 감싸기
+                  Expanded(
+                    flex: 2,
+                    child: Container(
+                      key: handCardsKey, // 전달받은 GlobalKey 사용
+                      padding: EdgeInsets.all(cardHeight * 0.03),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(cardHeight * 0.1),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.2),
+                          width: 1,
+                        ),
+                      ),
+                      child: handCards!,
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.max,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 1행: 프로필사진 + 닉네임
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      CircleAvatar(
+                        radius: avatar / 2,
+                        backgroundColor: Colors.grey.shade800,
+                        child: ClipOval(
+                          child: Image.asset(
+                            avatarUrl,
+                            width: avatar,
+                            height: avatar,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stack) => Icon(Icons.person, color: Colors.white, size: icon),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: cardHeight * 0.09),
+                      Text(
+                        nickname,
+                        style: TextStyle(
+                          fontSize: mainFont,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ],
+                  ),
+                  // 2행: 코인 상태창 (아래쪽에 딱 붙게)
+                  if (!(nickname.toLowerCase().startsWith('ai')))
+                    Padding(
+                      padding: EdgeInsets.only(top: isExpand ? 2 : cardHeight * 0.07),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isExpand ? 6 : cardHeight * 0.06,
+                          vertical: isExpand ? 2 : cardHeight * 0.025
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(cardHeight * 0.115),
+                          border: Border.all(color: Colors.amberAccent, width: 0.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.amberAccent.withOpacity(0.7),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Image.asset('assets/icons/coin.png', width: icon, height: icon),
-                            Shimmer.fromColors(
-                              baseColor: Colors.transparent,
-                              highlightColor: Colors.white.withOpacity(0.7),
-                              period: const Duration(seconds: 2),
-                              child: Image.asset(
-                                'assets/icons/coin.png',
-                                width: icon,
-                                height: icon,
-                                color: Colors.white,
-                                colorBlendMode: BlendMode.srcATop,
+                            Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Image.asset('assets/icons/coin.png', width: icon, height: icon),
+                                Shimmer.fromColors(
+                                  baseColor: Colors.transparent,
+                                  highlightColor: Colors.white.withOpacity(0.7),
+                                  period: const Duration(seconds: 2),
+                                  child: Image.asset(
+                                    'assets/icons/coin.png',
+                                    width: icon,
+                                    height: icon,
+                                    color: Colors.white,
+                                    colorBlendMode: BlendMode.srcATop,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(width: isExpand ? 4 : cardHeight * 0.025),
+                            Text(
+                              '$coins',
+                              style: TextStyle(
+                                color: Colors.amberAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: coinFont
                               ),
                             ),
                           ],
                         ),
-                        SizedBox(width: isExpand ? 4 : cardHeight * 0.025),
-                        Text(
-                          '$coins',
-                          style: TextStyle(
-                            color: Colors.amberAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: coinFont
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-            ],
-          ),
+                ],
+              ),
         );
       },
     );

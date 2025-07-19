@@ -454,6 +454,10 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   // AI 손패 카드별 GlobalKey 관리
   final Map<int, GlobalKey> aiHandCardKeys = {};
   
+  // AI 손패 카드 애니메이션 상태 관리
+  final Map<int, bool> aiHandCardAnimating = {};
+  final Map<int, Offset> aiHandCardTargetPositions = {};
+  
   // 카드더미 위치를 저장할 GlobalKey
   final GlobalKey deckKey = GlobalKey();
   // 12개 그룹용 빈자리 GlobalKey
@@ -499,6 +503,22 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
       width: cardWidth,
       height: cardHeight,
     );
+  }
+  
+  // AI 손패 카드 애니메이션 시작
+  void startAiHandCardAnimation(int cardIndex, Offset targetPosition) {
+    setState(() {
+      aiHandCardAnimating[cardIndex] = true;
+      aiHandCardTargetPositions[cardIndex] = targetPosition;
+    });
+  }
+  
+  // AI 손패 카드 애니메이션 완료
+  void completeAiHandCardAnimation(int cardIndex) {
+    setState(() {
+      aiHandCardAnimating[cardIndex] = false;
+      aiHandCardTargetPositions.remove(cardIndex);
+    });
   }
 
   void playEatAnimation(int handIndex, int fieldIndex) {
@@ -660,13 +680,15 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
           children: List.generate(firstRowCards, (i) =>
             Padding(
               padding: EdgeInsets.only(right: i == firstRowCards - 1 ? 0 : gap),
-              child: CardWidget(
-                key: aiHandCardKeys[i], // AI 손패 카드에 GlobalKey 할당
-                imageUrl: widget.deckBackImage,
-                isFaceDown: true,
-                width: cardWidth,
-                height: cardHeight,
-              ),
+              child: aiHandCardAnimating[i] == true 
+                ? const SizedBox.shrink() // 애니메이션 중이면 숨김
+                : CardWidget(
+                    key: aiHandCardKeys[i], // AI 손패 카드에 GlobalKey 할당
+                    imageUrl: widget.deckBackImage,
+                    isFaceDown: true,
+                    width: cardWidth,
+                    height: cardHeight,
+                  ),
             )
           ),
         ),
@@ -678,13 +700,15 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
             children: List.generate(secondRowCards, (i) =>
               Padding(
                 padding: EdgeInsets.only(right: i == secondRowCards - 1 ? 0 : gap),
-                child: CardWidget(
-                  key: aiHandCardKeys[firstRowCards + i], // 두 번째 줄 카드에 GlobalKey 할당
-                  imageUrl: widget.deckBackImage,
-                  isFaceDown: true,
-                  width: cardWidth,
-                  height: cardHeight,
-                ),
+                child: aiHandCardAnimating[firstRowCards + i] == true 
+                  ? const SizedBox.shrink() // 애니메이션 중이면 숨김
+                  : CardWidget(
+                      key: aiHandCardKeys[firstRowCards + i], // 두 번째 줄 카드에 GlobalKey 할당
+                      imageUrl: widget.deckBackImage,
+                      isFaceDown: true,
+                      width: cardWidth,
+                      height: cardHeight,
+                    ),
               )
             ),
           ),
