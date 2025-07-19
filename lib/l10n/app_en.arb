@@ -53,7 +53,7 @@
   "accountDeleteWarning": "If you delete your account, all personal information will be permanently deleted and cannot be recovered.",
   "guestAccount": "Guest Account",
   "guestWarning": "You are logged in as a guest. Game records are not saved, and all data will be lost if you delete the app. We recommend creating an account.",
-  "aiMatch": "AI Match",
+  "aiMatch": "Single Match",
   "twoPlayerMatch": "2P Match",
   "onlinePvp": "Online PvP",
   "friendMatch": "Friend Match",
