@@ -80,47 +80,32 @@ class DeckPositionCache {
   }
   
   Offset _calculateDeckPosition(BuildContext context, int cardCount) {
-    final GoStopBoardState? boardState = boardKey.currentState;
-    
-    if (boardState != null) {
-      final RenderBox? deckRenderBox = boardState.deckKey.currentContext?.findRenderObject() as RenderBox?;
-      final RenderBox? screenRenderBox = context.findRenderObject() as RenderBox?;
-      
-      if (deckRenderBox != null && screenRenderBox != null) {
-        final deckGlobalPosition = deckRenderBox.localToGlobal(Offset.zero, ancestor: screenRenderBox);
+    // 셔플 애니메이션은 필드 영역의 정중앙에서 실행
         final Size screenSize = MediaQuery.of(context).size;
         final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
-        final double deckCardWidth = minSide * 0.08;
-        final double deckCardHeight = deckCardWidth * 1.5;
-        final visibleCount = min(10, cardCount);
-        final topCardOffsetX = (visibleCount - 1) * (deckCardWidth * 0.0625);
-        final topCardOffsetY = (visibleCount - 1) * (deckCardHeight * 0.021);
-        
-        return Offset(
-          deckGlobalPosition.dx + topCardOffsetX,
-          deckGlobalPosition.dy + topCardOffsetY,
-        );
-      }
-    }
     
-    // 기본 위치 계산
-    final Size screenSize = MediaQuery.of(context).size;
-    final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
-    final double centerX = screenSize.width / 2;
-    final double centerY = screenSize.height / 2;
+    // 필드 영역의 정확한 위치 계산 (buildFieldArea와 동일한 로직)
+    final fieldPanelRatio = 0.67; // 필드 영역이 화면의 67% 차지
+    final fieldPanelHeight = screenSize.height - (minSide * 0.19) - (minSide * 0.10);
+    final fieldWidth = screenSize.width * fieldPanelRatio;
+    final fieldHeight = fieldPanelHeight;
+    
+    // 필드 영역의 중앙 좌표
+    final fieldCenterX = fieldWidth / 2; // 필드 영역 내에서의 중앙 X
+    final fieldCenterY = fieldHeight / 2; // 필드 영역 내에서의 중앙 Y
+    
+    // 카드 크기 계산
     final double deckCardWidth = minSide * 0.08;
     final double deckCardHeight = deckCardWidth * 1.5;
     
-    final deckLeft = centerX - (deckCardWidth / 2);
-    final deckTop = centerY - (deckCardHeight / 2);
-    
+    // 카드더미의 top card 위치 계산
     final visibleCount = min(10, cardCount);
     final topCardOffsetX = (visibleCount - 1) * (deckCardWidth * 0.0625);
     final topCardOffsetY = (visibleCount - 1) * (deckCardHeight * 0.021);
     
     return Offset(
-      deckLeft + topCardOffsetX,
-      deckTop + topCardOffsetY,
+      fieldCenterX + topCardOffsetX,
+      fieldCenterY + topCardOffsetY,
     );
   }
   
@@ -210,7 +195,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   late AnimationController _dealAnimationController;
   
   // 카드 분배 애니메이션 추적
-  int _dealtCardsCount = 0; // 분배된 카드 수 추적
+
   
   // 최근 플레이된 카드 위치(id -> Offset). 필드에 Key가 아직 없을 때 사용
   final Map<int, Offset> _recentCardPositions = {};
@@ -1577,8 +1562,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final rowGap = cardHeight * 0.6;
     const maxPerRow = 5;
     
-    // 획득 영역의 시작 위치 (우측 패널 내부)
-    final capturedStartX = screenSize.width * 0.85;
+    // 획득 영역의 시작 위치 (실제 획득 영역 위치)
+    // gostop_board.dart의 레이아웃을 참고하여 정확한 위치 계산
     final capturedY = player == 1 
         ? screenSize.height * 0.75  // 플레이어 획득 영역 (하단)
         : screenSize.height * 0.25; // AI 획득 영역 (상단)
@@ -1589,7 +1574,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final typeIndex = order.indexOf(cardType);
     
     // 타입별 수직 간격 (타입 라벨 + 카드 스택)
-    final typeGap = cardHeight * 0.9; // capturedOverlapRow에서 사용하는 간격
+    final typeGap = cardWidth * 0.9; // capturedOverlapRow에서 사용하는 간격
     
     // 현재 타입 내에서의 카드 인덱스 계산
     final currentCaptured = engine.getCaptured(player);
@@ -1602,9 +1587,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final row = cardIndexInType ~/ maxPerRow;
     final col = cardIndexInType % maxPerRow;
     
-    // 타입별 시작 위치 계산
-    final typeStartX = capturedStartX + typeIndex * (cardWidth + typeGap);
-    final typeStartY = capturedY - cardHeight / 2 + cardHeight * 0.3; // 라벨 아래 여백
+    // 타입별 시작 위치 계산 (capturedOverlapRow와 정확히 동일한 계산)
+    final totalTypeWidth = 4 * (cardWidth + typeGap) - typeGap; // 4개 타입의 총 너비
+    final typeStartX = screenSize.width / 2 - totalTypeWidth / 2 + typeIndex * (cardWidth + typeGap);
+    
+    // 라벨 높이를 고려한 시작 Y 위치 (capturedOverlapRow의 실제 구조 반영)
+    final labelHeight = cardHeight * 0.19; // 라벨 텍스트 높이
+    final typeStartY = capturedY - cardHeight / 2 + labelHeight + cardHeight * 0.1; // 라벨 아래 여백
     
     // capturedOverlapRow와 동일한 정확한 좌표 계산
     return Offset(
@@ -1615,11 +1604,6 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
   // 카드들을 순서대로 획득 영역으로 이동하는 애니메이션
   void _playCardCaptureAnimation(List<GoStopCard> cards, int player) async {
-    // 보너스피가 포함되어 있고, 방금 플레이한 카드 위에 겹치기 애니메이션이 진행 중이라면
-    if (cards.any((c) => c.isBonus)) {
-      // 겹치기 애니메이션(CardMoveAnimation) 길이(≈500ms) 만큼 기다려 준다.
-      await Future.delayed(const Duration(milliseconds: 550));
-    }
     // 카드 우선순위: 광 > 띠 > 동물 > 피 순서로 정렬
     cards.sort((a, b) {
       final priorityA = _getCardPriority(a);
@@ -1628,19 +1612,34 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     });
 
     final playerIdx = player - 1;
-    int completedAnimations = 0; // 완료된 애니메이션 개수 추적
 
     // 각 카드를 순서대로 애니메이션 실행
     for (int i = 0; i < cards.length; i++) {
       final card = cards[i];
       final fromOffset = _getCardPosition('field', card);
-      
-      // capturedOverlapRow와 동일한 정확한 좌표 사용
-      final toOffset = _getExactCapturedPosition(card, player);
+      // 획득 그룹이 아직 완전히 렌더링되지 않아서 fallback 좌표(유령 카드)가 반환되는 경우 fallback 좌표(임시 좌표)가 반환되는 경우가 있다.
+      // 이런 경우 1프레임 대기 후 실제 위치로 재계산하여 실제 획득 위치 좌표를 사용하도록 수정했다.
+      Size _screenSize = MediaQuery.of(context).size;
+      Offset toOffset = _getCardPosition('captured', card, playerId: player);
 
-      // 플레이어에 따라 정확한 위치가 계산되었으므로 fallback 체크 불필요
+      bool _isFallbackOffset(Offset o) {
+        // player 1(하단) fallback: 임시 하단 좌표, player 2(상단) fallback: 임시 상단 좌표
+        if (player == 1) {
+          return (o.dx - (_screenSize.width / 2 - 48)).abs() < 2 &&
+                 (o.dy - (_screenSize.height - 120)).abs() < 2;
+        } else {
+          return (o.dx - (_screenSize.width / 2 - 48)).abs() < 2 &&
+                 (o.dy - 120).abs() < 2;
+        }
+      }
 
-      // 획득 카드 영역의 카드 크기 계산 (capturedOverlapRow와 동일 공식)
+      if (_isFallbackOffset(toOffset)) {
+        // 1프레임 대기 후 재계산(레이아웃 완료 대기)
+        await Future.delayed(const Duration(milliseconds: 16));
+        toOffset = _getCardPosition('captured', card, playerId: player);
+      }
+
+      // 획득 카드 크기 계산 (capturedOverlapRow와 동일한 방식)
       final screenSize = MediaQuery.of(context).size;
       final minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
       final capturedCardWidth = minSide * 0.0455;
@@ -1651,67 +1650,40 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         await Future.delayed(const Duration(milliseconds: 200));
       }
       
-      // 원본 필드 카드 즉시 제거 + 애니메이션 위젯 추가를 한 번의 setState로 통합
+      // 즉시 필드에서 카드 제거 + 애니메이션 위젯 추가를 한 번의 setState로 처리
+      final uniqKey = UniqueKey();
+
+      final anim = SimpleCardMoveAnimation(
+        cardImage: card.imageUrl,
+        startPosition: fromOffset,
+        endPosition: toOffset,
+        cardWidth: capturedCardWidth,
+        cardHeight: capturedCardHeight,
+        onComplete: () {
+          // 애니메이션 완료 시 해당 카드를 즉시 획득 리스트에 추가 (기존 리스트 유지)
+          final current = engine.deckManager.capturedCards[playerIdx] ?? [];
+          engine.deckManager.capturedCards[playerIdx] = List<GoStopCard>.from(current)..add(card);
+
+          // pendingCaptured 리스트 정리
+          engine.pendingCaptured.removeWhere((c) => c.id == card.id);
+
+          // 자신(Key)만 제거하여 다른 애니메이션에 영향 없도록 함
+          setState(() {
+            activeAnimations.removeWhere((w) => w.key == uniqKey);
+            if (activeAnimations.isEmpty) isAnimating = false;
+          });
+        },
+        duration: const Duration(milliseconds: 500),
+      );
+
+      // KeyedSubtree로 감싸서 List<Widget>에서의 고유 키 관리
       setState(() {
         engine.deckManager.fieldCards.removeWhere((c) => c.id == card.id);
         isAnimating = true;
-
-        // 고유 키로 애니메이션 위젯 식별
-        final uniqKey = UniqueKey();
-
-          final anim = CapturedCardAnimation(
-          cardImage: card.imageUrl,
-          startPosition: fromOffset,
-          endPosition: toOffset,
-          cardWidth: capturedCardWidth,
-          cardHeight: capturedCardHeight,
-          onComplete: () {
-            // pendingCaptured 리스트 정리
-            engine.pendingCaptured.removeWhere((c) => c.id == card.id);
-
-            // 자신(Key)만 제거하여 다른 애니메이션에 영향 없도록 함
-            setState(() {
-              activeAnimations.removeWhere((w) => w.key == uniqKey);
-              completedAnimations++;
-              
-              // ── 모든 캡처 애니메이션이 완료된 후에만 점수 업데이트 ──
-              if (completedAnimations == cards.length) {
-                isAnimating = false;
-                
-                // 모든 카드가 획득 영역에 도착한 후 점수 계산
-                _updateScoresAndCheckGoStop();
-                
-                // ── 디버깅: 피 점수 계산 확인 ──
-                final playerCaptured = engine.getCaptured(1);
-                final piCards = playerCaptured.where((c) => c.type == '피').toList();
-                int totalPiScore = 0;
-                for (final c in piCards) {
-                  final img = c.imageUrl;
-                  if (img.contains('bonus_3pi') || (c.isBonus && img.contains('3pi'))) {
-                    totalPiScore += 3;
-                  } else if (img.contains('bonus_ssangpi') || (c.isBonus && img.contains('ssangpi'))) {
-                    totalPiScore += 2;
-                  } else if (img.contains('3pi')) {
-                    totalPiScore += 3;
-                  } else if (img.contains('ssangpi')) {
-                    totalPiScore += 2;
-                  } else {
-                    totalPiScore += 1;
-                  }
-                }
-                final piScore = totalPiScore >= 10 ? totalPiScore - 9 : 0;
-                print('DEBUG: 피 카드 ${piCards.length}장, 총 피 점수 $totalPiScore, 게임 피 점수 $piScore, 총 점수 $_displayPlayerScore');
-              }
-            });
-          },
-          duration: const Duration(milliseconds: 500),
-        );
-
-        // KeyedSubtree로 감싸서 List<Widget>에서도 고유 식별 가능
         activeAnimations.add(KeyedSubtree(key: uniqKey, child: anim));
       });
     }
-    // 모든 애니메이션이 끝난 후 별도의 _moveCardsToCaptured 호출은 필요 없음
+    // 모든 애니메이션이 끝난 후 별도로 _moveCardsToCaptured 호출할 필요 없음
   }
 
   // 카드 우선순위 계산 (광 > 띠 > 동물 > 피)
@@ -1740,7 +1712,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   // 카드 위치 계산 함수 (실제 배치 위치 기반)
-  Offset _getCardPosition(String area, GoStopCard card) {
+  Offset _getCardPosition(String area, GoStopCard card, {int? playerId}) {
     final Size screenSize = MediaQuery.of(context).size;
     final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
     
@@ -1874,15 +1846,39 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         );
         
       case 'captured':
-        // 획득 영역 (플레이어는 하단, AI는 상단)
-        // player 매개변수를 받아서 정확한 위치 계산
-        final capturedY = screenSize.height * 0.75; // 기본값 (플레이어)
-        final capturedX = screenSize.width / 2;
-        
-        return Offset(
-          capturedX - 36,
-          capturedY - 54,
-        );
+        // 카드 타입별 그룹핑 Key 설정
+        String groupType = card.type;
+        if (groupType == '동물') groupType = '끗';
+
+        Offset? groupOffset;
+        final GlobalKey? groupKey = playerId == 2
+            ? boardKey.currentState?.getAiCapturedTypeKey(groupType)
+            : boardKey.currentState?.getCapturedTypeKey(groupType);
+
+        if (groupKey != null && groupKey.currentContext != null) {
+          final RenderBox box = groupKey.currentContext!.findRenderObject() as RenderBox;
+          groupOffset = box.localToGlobal(Offset.zero);
+        }
+
+        // fallback 좌표 (플레이어별 구분)
+        Offset position = groupOffset ?? (playerId == 2
+            ? Offset(screenSize.width / 2 - 48, 120)
+            : Offset(screenSize.width / 2 - 48, screenSize.height - 120));
+
+        // 카드 개별 overlap offset 조정(같은 타입의 카드들이 겹쳐서 이동) 
+        final capturedList = engine.deckManager.capturedCards[(playerId ?? 1) - 1] ?? [];
+        final grouped = groupCapturedByType(capturedList);
+        int idxInGroup = 0;
+        if (grouped.containsKey(groupType)) {
+          idxInGroup = grouped[groupType]!.length; // 현재 카드 개수(새 카드 index)
+        }
+
+        // 카드 개별 overlapX 계산 (획득 카드 UI와 동일한 방식)
+        final minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
+        final cWidth = minSide * 0.0455;
+        final overlapX = cWidth * 0.45;
+
+        return position.translate(idxInGroup * overlapX, 0);
         
       case 'ai_captured':
         // AI 획득 영역 (상단)
@@ -1985,7 +1981,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final List<GoStopCard> fieldCards = List<GoStopCard>.from(engine.getField());
     // 카드더미 개수 계산 (애니메이션 중에는 분배된 카드 수를 고려)
     final int drawPileCount = engine.deckManager.drawPile.isEmpty 
-        ? (engine.deckManager.animationDeck.length - _dealtCardsCount)
+        ? engine.deckManager.drawPile.length
         : engine.drawPileCount;
     // 먹을 수 있는 카드 인덱스 계산
     final fieldMonths = fieldCards.map((c) => c.month).where((m) => m > 0).toSet();
@@ -2316,7 +2312,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
-  // 보너스피 애니메이션: 카드더미에서 "한 번만" 뒤집힌 뒤 곧바로 내가 낸 카드 위로 이동하여 겹침
+  // 보너스피 애니메이션: engine.mdc 규칙에 따른 올바른 처리
   void _handleBonusCardAnimation(Map<String, dynamic> data) {
     final GoStopCard card = data['card'] as GoStopCard;
     final Function()? onComplete = data['onComplete'] as Function()?;
@@ -2324,15 +2320,17 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     // ① 카드더미 위치 (시작)
     final Offset deckOffset = _getCardPosition('deck', card);
 
-    // ② 도착 위치: 방금 낸 카드(playedCard) 위치
-    final GoStopCard? baseCard = engine.playedCard;
-    if (baseCard == null) return; // 방어
-    final Offset targetOffset = _getCardPosition('field', baseCard);
+    // ② 내가 낸 카드 위치 (필드가 아닌 내가 낸 카드 위)
+    final GoStopCard? playedCard = engine.playedCard;
+    if (playedCard == null) return; // 방어
+    
+    // 내가 낸 카드의 실제 위치 계산 (필드 위치가 아닌)
+    final playedCardOffset = _getCardPosition('field', playedCard);
 
     setState(() {
       isAnimating = true;
 
-      // 1단계: 제자리 뒤집기 (카드더미 위에서 앞면 확인)
+      // 1단계: 카드더미에서 제자리 뒤집기 (400ms)
       activeAnimations.add(
         CardFlipMoveAnimation(
           backImage: 'assets/cards/back.png',
@@ -2346,13 +2344,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
               activeAnimations.removeWhere((anim) => anim is CardFlipMoveAnimation);
             });
 
-            // 2단계: 이동 애니메이션 (추가 뒤집기 없이 바로 겹침)
+            // 2단계: 내가 낸 카드 위로 이동 (400ms)
             setState(() {
               activeAnimations.add(
                 CardMoveAnimation(
                   cardImage: card.imageUrl,
                   startPosition: deckOffset,
-                  endPosition: targetOffset,
+                  endPosition: playedCardOffset,
                   withTrail: false,
                   duration: const Duration(milliseconds: 400),
                   onComplete: () {
@@ -2360,7 +2358,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                       activeAnimations.removeWhere((anim) => anim is CardMoveAnimation);
                       if (activeAnimations.isEmpty) isAnimating = false;
                     });
-                    // 엔진 콜백 실행 (다음 로직 진행)
+                    
+                    // 3단계: pendingCaptured에 추가 (즉시, 애니메이션 없음)
+                    // engine.pendingCaptured.add(card); // 엔진에서 처리됨
+                    
+                    // 4단계: 엔진 콜백 실행 (카드더미에서 한 장 더 뒤집기)
                     if (onComplete != null) onComplete();
                   },
                 ),
@@ -2372,16 +2374,16 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     });
   }
 
-  // 카드 분배 애니메이션 시작
+  // 카드 분배 시작 (애니메이션 없이 즉시 분배)
   Future<void> _startDealAnimation() async {
     // 셔플 애니메이션 먼저 실행
     await _runShuffleAnimation();
     
-    // 덱에서 카드들을 분배하는 애니메이션
-    await _dealCardsWithAnimation();
+    // 즉시 카드 분배 (애니메이션 없음)
+    _dealCardsImmediately();
     
-    // 분배 완료 후 AI 턴 시작
-    _runAiTurnIfNeeded();
+    // 분배 완료 후 게임 시작
+    _startGameAfterDeal();
   }
 
   // 셔플 애니메이션 실행
@@ -2438,251 +2440,97 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     print('🎯 셔플 완료, 분배 시작');
   }
 
-  // 카드 분배 애니메이션
-  Future<void> _dealCardsWithAnimation() async {
-    print('🎯 카드 분배 애니메이션 시작');
+  // 즉시 카드 분배 (애니메이션 없음)
+  void _dealCardsImmediately() {
+    print('🎯 즉시 카드 분배 시작');
     
-    // 새로운 애니메이션 상태 매니저 사용
-    animationStateManager.startAnimation(AnimationPhase.deal);
-    
-    // 실제 게임 덱 상태 확인 (animationDeck이 아닌 drawPile 사용)
-    print('🎯 실제 게임 덱 상태: drawPile ${engine.deckManager.drawPile.length}장');
-    print('🎯 실제 게임 덱 카드들: ${engine.deckManager.drawPile.take(10).map((c) => '${c.month}월').toList()}');
-    
-    // 덱 상태 상세 확인
-    print('🎯 === 덱 상태 상세 확인 ===');
-    print('🎯 fullDeck: ${engine.deckManager.fullDeck.length}장');
-    print('🎯 animationDeck: ${engine.deckManager.animationDeck.length}장');
-    print('🎯 drawPile: ${engine.deckManager.drawPile.length}장');
-    print('🎯 fieldCards: ${engine.deckManager.fieldCards.length}장');
-    print('🎯 playerHands[0]: ${engine.deckManager.playerHands[0]?.length ?? 0}장');
-    print('🎯 playerHands[1]: ${engine.deckManager.playerHands[1]?.length ?? 0}장');
-    
-    // drawPile의 상위 10장 카드 상세 정보
-    print('🎯 === drawPile 상위 10장 카드 상세 ===');
-    for (int i = 0; i < engine.deckManager.drawPile.length && i < 10; i++) {
-      final card = engine.deckManager.drawPile[i];
-      print('🎯 ${i + 1}번째: ${card.month}월 ${card.name} (ID: ${card.id}, 타입: ${card.type})');
-    }
-    
-    // 실제 카드더미 위치 계산 (필드 중앙의 카드더미와 정확히 일치)
-    final Size screenSize = MediaQuery.of(context).size;
-    final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
-    final double centerX = screenSize.width / 2;
-    final double centerY = screenSize.height / 2;
-    final double deckCardWidth = minSide * 0.08;
-    final double deckCardHeight = deckCardWidth * 1.5;
-    
-    // 카드더미의 실제 위치 (필드 중앙)
-    final deckPosition = Offset(
-      centerX - (deckCardWidth / 2),
-      centerY - (deckCardHeight / 2),
-    );
-    
-    print('🎯 분배 애니메이션 카드더미 위치: $deckPosition (필드 중앙)');
-    
-    // 분배할 카드들 준비 (28장) - 정확한 고스톱 규칙에 따라
-    final deals = <Map<String, dynamic>>[];
-    
+    // 정확한 고스톱 분배 규칙에 따라 카드 분배
     // === 첫 번째 분배 ===
     // 1. 필드에 4장
     for (int i = 0; i < 4; i++) {
-      deals.add({'type': 'field', 'index': i, 'round': 1});
+      if (engine.deckManager.drawPile.isNotEmpty) {
+        final card = engine.deckManager.drawPile.removeAt(0);
+        engine.deckManager.fieldCards.add(card);
+        print('🎯 필드 카드 추가: ${card.month}월 ${card.name}');
+      }
     }
     
     // 2. 후공(AI)에 5장
     for (int i = 0; i < 5; i++) {
-      deals.add({'type': 'ai_hand', 'index': i, 'round': 1});
+      if (engine.deckManager.drawPile.isNotEmpty) {
+        final card = engine.deckManager.drawPile.removeAt(0);
+        engine.deckManager.playerHands[1]!.add(card);
+        print('🎯 AI 손패 추가: ${card.month}월 ${card.name}');
+      }
     }
     
     // 3. 선공(사용자)에 5장
     for (int i = 0; i < 5; i++) {
-      deals.add({'type': 'player1', 'index': i, 'round': 1});
+      if (engine.deckManager.drawPile.isNotEmpty) {
+        final card = engine.deckManager.drawPile.removeAt(0);
+        engine.deckManager.playerHands[0]!.add(card);
+        print('🎯 플레이어 손패 추가: ${card.month}월 ${card.name}');
+      }
     }
     
     // === 두 번째 분배 ===
     // 4. 필드에 추가 4장
-    for (int i = 4; i < 8; i++) {
-      deals.add({'type': 'field', 'index': i, 'round': 2});
+    for (int i = 0; i < 4; i++) {
+      if (engine.deckManager.drawPile.isNotEmpty) {
+        final card = engine.deckManager.drawPile.removeAt(0);
+        engine.deckManager.fieldCards.add(card);
+        print('🎯 필드 카드 추가: ${card.month}월 ${card.name}');
+      }
     }
     
     // 5. 선공(사용자)에 추가 5장
-    for (int i = 5; i < 10; i++) {
-      deals.add({'type': 'player1', 'index': i, 'round': 2});
+    for (int i = 0; i < 5; i++) {
+      if (engine.deckManager.drawPile.isNotEmpty) {
+        final card = engine.deckManager.drawPile.removeAt(0);
+        engine.deckManager.playerHands[0]!.add(card);
+        print('🎯 플레이어 손패 추가: ${card.month}월 ${card.name}');
+      }
     }
     
     // 6. 후공(AI)에 추가 5장
-    for (int i = 5; i < 10; i++) {
-      deals.add({'type': 'ai_hand', 'index': i, 'round': 2});
-    }
-    
-    print('🎯 정확한 고스톱 분배 계획:');
-    print('🎯 첫 번째 분배: 필드 4장 → 후공 5장 → 선공 5장');
-    print('🎯 두 번째 분배: 필드 4장 → 선공 5장 → 후공 5장');
-    print('🎯 최종: 필드 ${deals.where((d) => d['type'] == 'field').length}장, 플레이어1 ${deals.where((d) => d['type'] == 'player1').length}장, AI ${deals.where((d) => d['type'] == 'ai_hand').length}장');
-    
-    // 실제 게임 덱에서 카드 분배 애니메이션
-    for (int i = 0; i < deals.length; i++) {
-      final deal = deals[i];
-      
-      // 실제 게임 덱에서 카드 제거 (중요!)
-      if (engine.deckManager.drawPile.isEmpty) {
-        print('❌ 실제 게임 덱이 비었습니다!');
-        break;
+    for (int i = 0; i < 5; i++) {
+      if (engine.deckManager.drawPile.isNotEmpty) {
+        final card = engine.deckManager.drawPile.removeAt(0);
+        engine.deckManager.playerHands[1]!.add(card);
+        print('🎯 AI 손패 추가: ${card.month}월 ${card.name}');
       }
-      
-      // 실제 게임 덱의 맨 위 카드를 뽑음 (카드더미의 실제 카드 사용)
-      final card = engine.deckManager.drawPile.removeAt(0); // 실제 덱에서 카드 제거
-      
-      print('🎯 분배 ${i + 1}: ${deal['type']}에 ${card.month}월 ${card.name} 카드 분배 (실제 덱 남은장: ${engine.deckManager.drawPile.length})');
-      
-      // 분배된 카드 수 증가
-      _dealtCardsCount++;
-      
-      // 실제 카드 데이터에 추가 (애니메이션과 동시에)
-      setState(() {
-        switch (deal['type']) {
-          case 'field':
-            engine.deckManager.fieldCards.add(card);
-            print('🎯 필드 카드 추가: ${card.month}월 ${card.name} (총 ${engine.deckManager.fieldCards.length}장)');
-            break;
-          case 'player1':
-            engine.deckManager.playerHands[0]!.add(card);
-            print('🎯 플레이어1 손패 추가: ${card.month}월 ${card.name} (총 ${engine.deckManager.playerHands[0]!.length}장)');
-            break;
-          case 'player2':
-            engine.deckManager.playerHands[1]!.add(card);
-            print('🎯 플레이어2 손패 추가: ${card.month}월 ${card.name} (총 ${engine.deckManager.playerHands[1]!.length}장)');
-            break;
-          case 'ai_hand':
-            engine.deckManager.playerHands[1]!.add(card);
-            print('🎯 AI 손패 추가: ${card.month}월 ${card.name} (총 ${engine.deckManager.playerHands[1]!.length}장)');
-            break;
-        }
-      });
-      
-      // 실제 카드의 인덱스를 사용해서 정확한 위치 계산
-      final targetPosition = _getCardPosition(deal['type'], card);
-      
-      // 통일된 카드 스타일 사용
-      final Size screenSize = MediaQuery.of(context).size;
-      final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
-      final double deckCardWidth = CardStyleManager.getCardWidth(minSide);
-      final double deckCardHeight = CardStyleManager.getCardHeight(minSide);
-      
-      // 뽑은 실제 카드를 그대로 애니메이션에 사용
-      setState(() {
-        isAnimating = true;
-        final round = deal['round'] as int;
-        final roundText = round == 1 ? '첫 번째' : '두 번째';
-        print('🎯 ${roundText} 분배 ${i + 1}: ${deal['type']}에 ${card.month}월 ${card.name} 카드 분배 (실제 덱 남은장: ${engine.deckManager.drawPile.length})');
-        print('🎯 실제 카드더미 카드 애니메이션 추가: ${deal['type']} 카드 ${i + 1} (뽑은 카드: ${card.month}월 ${card.name}, 시작: $deckPosition → 도착: $targetPosition)');
-        
-        // 카드더미의 실제 카드 위젯을 애니메이션에 직접 사용
-        final deckState = boardKey.currentState;
-        if (deckState != null && deckState.deckKey.currentState != null) {
-          // 카드더미 위젯 상태에 접근
-          final deckWidgetState = deckState.deckKey.currentState! as dynamic;
-          
-          // 카드더미의 top card 위치를 정확히 계산
-          final topCardPosition = deckWidgetState.getTopCardPosition();
-          if (topCardPosition != null) {
-            // 실제 카드 위젯을 Overlay로 이동 (심플한 애니메이션)
-            deckWidgetState.moveCardToOverlay(
-              i, // 카드 인덱스
-              topCardPosition, // 실제 top card 위치에서 시작
-              targetPosition, // 목표 위치
-              () {
-                print('🎯 실제 카드더미 카드 애니메이션 완료: ${deal['type']} 카드 ${i + 1} (${card.month}월 ${card.name})');
-                setState(() {
-                  if (activeAnimations.isEmpty) {
-                    // 분배 애니메이션 완료 시 상태 관리
-                    animationStateManager.completeAnimation(AnimationPhase.deal);
-                    print('🎯 모든 실제 카드더미 카드 애니메이션 완료');
-                  }
-                });
-              },
-            );
-          } else {
-            print('⚠️ top card 위치를 계산할 수 없음');
-            // 폴백: 기존 방식 사용
-            activeAnimations.add(
-              _DeckCardReuseAnimation(
-                card: card,
-                isFaceUp: deal['type'] == 'field',
-                startPosition: deckPosition,
-                endPosition: targetPosition,
-                cardWidth: deckCardWidth,
-                cardHeight: deckCardHeight,
-                cardIndex: i,
-                deckKey: boardKey.currentState?.deckKey,
-                deckCardWidget: null,
-                onComplete: () {
-                  print('🎯 폴백 애니메이션 완료: ${deal['type']} 카드 ${i + 1}');
-                  setState(() {
-                    activeAnimations.removeWhere((anim) => anim is _DeckCardReuseAnimation);
-                    if (activeAnimations.isEmpty) {
-                      animationStateManager.completeAnimation(AnimationPhase.deal);
-                      print('🎯 모든 폴백 애니메이션 완료');
-                    }
-                  });
-                },
-                duration: const Duration(milliseconds: 600), // 심플 애니메이션과 동일한 시간
-                withTrail: false, // 심플하게 트레일 제거
-              ),
-            );
-          }
-        } else {
-          print('⚠️ 카드더미 상태에 접근할 수 없음');
-          // 폴백: 기존 방식 사용
-          activeAnimations.add(
-            _DeckCardReuseAnimation(
-              card: card,
-              isFaceUp: deal['type'] == 'field',
-              startPosition: deckPosition,
-              endPosition: targetPosition,
-              cardWidth: deckCardWidth,
-              cardHeight: deckCardHeight,
-              cardIndex: i,
-              deckKey: boardKey.currentState?.deckKey,
-              deckCardWidget: null,
-              onComplete: () {
-                print('🎯 폴백 애니메이션 완료: ${deal['type']} 카드 ${i + 1}');
-                setState(() {
-                  activeAnimations.removeWhere((anim) => anim is _DeckCardReuseAnimation);
-                  if (activeAnimations.isEmpty) {
-                    animationStateManager.completeAnimation(AnimationPhase.deal);
-                    print('🎯 모든 폴백 애니메이션 완료');
-                  }
-                });
-              },
-              duration: const Duration(milliseconds: 600), // 심플 애니메이션과 동일한 시간
-              withTrail: false, // 심플하게 트레일 제거
-            ),
-          );
-        }
-      });
-      
-      // 카드 분배 효과음
-      SoundManager.instance.play(Sfx.cardPlay);
-      
-      // 다음 카드 분배까지 대기
-      await Future.delayed(const Duration(milliseconds: 150));
     }
-    
-    print('🎯 카드 분배 애니메이션 완료');
-    print('🎯 최종 상태: 필드 ${engine.deckManager.fieldCards.length}장, 플레이어1 ${engine.deckManager.playerHands[0]!.length}장, 플레이어2 ${engine.deckManager.playerHands[1]!.length}장');
-    print('🎯 실제 덱 남은장: ${engine.deckManager.drawPile.length}장');
     
     // 보너스 카드 처리
     _handleInitialBonusCards();
     
-    // 분배 완료 후 리셋
-    setState(() {
-      _dealtCardsCount = 0; // 분배 완료 후 리셋
-    });
+    // UI 업데이트
+    setState(() {});
     
-    print('🎯 카드 분배 완료! 실제 덱: ${engine.deckManager.drawPile.length}장');
+    print('🎯 즉시 카드 분배 완료');
+    print('🎯 최종 상태: 필드 ${engine.deckManager.fieldCards.length}장, 플레이어 ${engine.deckManager.playerHands[0]!.length}장, AI ${engine.deckManager.playerHands[1]!.length}장');
+    print('🎯 실제 덱 남은장: ${engine.deckManager.drawPile.length}장');
+  }
+  
+  // 분배 완료 후 게임 시작
+  void _startGameAfterDeal() {
+    print('🎯 분배 완료 후 게임 시작');
+    
+    // 엔진 상태 초기화
+    engine.currentPhase = TurnPhase.playingCard;
+    engine.tapLock = false;
+    
+    print('🎯 엔진 상태 설정: currentPlayer=${engine.currentPlayer}, currentPhase=${engine.currentPhase}');
+    
+    // 선 플레이어가 1번(사용자)이면 바로 플레이어 턴 시작
+    // 선 플레이어가 2번(AI)이면 AI 턴 시작
+    if (engine.currentPlayer == 1) {
+      print('🎯 플레이어 턴 시작 (선 플레이어)');
+      // 플레이어 턴이므로 아무것도 하지 않음 (카드 선택 대기)
+          } else {
+      print('🎯 AI 턴 시작 (선 플레이어)');
+      _runAiTurnIfNeeded();
+    }
   }
   
   // 필드 카드들을 앞면으로 뒤집기
@@ -3148,593 +2996,13 @@ enum DealPhase {
   settling    // 안정화
 }
 
-// 카드더미의 실제 카드 위젯을 재사용하는 다단계 애니메이션 클래스
-class _DeckCardReuseAnimation extends StatefulWidget {
-  final GoStopCard card;
-  final bool isFaceUp;
-  final Offset startPosition;
-  final Offset endPosition;
-  final double cardWidth;
-  final double cardHeight;
-  final VoidCallback? onComplete;
-  final Duration duration;
-  final bool withTrail;
-  final int cardIndex; // 카드 순서 (타이밍 조절용)
-  final GlobalKey? deckKey; // 카드더미 위젯 키
-  final Widget? deckCardWidget; // 카드더미의 실제 카드 위젯
 
-  const _DeckCardReuseAnimation({
-    required this.card,
-    required this.isFaceUp,
-    required this.startPosition,
-    required this.endPosition,
-    required this.cardWidth,
-    required this.cardHeight,
-    this.onComplete,
-    this.duration = const Duration(milliseconds: 800),
-    this.withTrail = true,
-    required this.cardIndex,
-    this.deckKey,
-    this.deckCardWidget,
-  });
 
-  @override
-  State<_DeckCardReuseAnimation> createState() => _DeckCardReuseAnimationState();
-}
 
-class _DeckCardReuseAnimationState extends State<_DeckCardReuseAnimation>
-    with TickerProviderStateMixin {
-  // 다단계 애니메이션 컨트롤러들
-  late AnimationController _pickupController;
-  late AnimationController _arcController;
-  late AnimationController _landingController;
-  late AnimationController _settlingController;
-  
-  // 애니메이션 값들
-  late Animation<Offset> _pickupAnimation;
-  late Animation<Offset> _arcAnimation;
-  late Animation<Offset> _landingAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _rotationAnimation;
-  late Animation<double> _elevationAnimation;
-  
-  // 현재 단계
-  DealPhase currentPhase = DealPhase.pickup;
-  
-  // 중간 지점 (호를 그리기 위한)
-  late Offset _midPoint;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeControllers();
-    _calculateMidPoint();
-    _startDealAnimation();
-  }
 
-  void _initializeControllers() {
-    // 1단계: 집기 (카드더미에서 살짝 들어올리기)
-    _pickupController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    
-    // 2단계: 호를 그리며 이동
-    _arcController = AnimationController(
-      duration: const Duration(milliseconds: 400),
-      vsync: this,
-    );
-    
-    // 3단계: 착지
-    _landingController = AnimationController(
-      duration: const Duration(milliseconds: 150),
-      vsync: this,
-    );
-    
-    // 4단계: 안정화
-    _settlingController = AnimationController(
-      duration: const Duration(milliseconds: 100),
-      vsync: this,
-    );
 
-    // 애니메이션 설정
-    _pickupAnimation = Tween<Offset>(
-      begin: widget.startPosition,
-      end: widget.startPosition + const Offset(0, -20), // 살짝 들어올리기
-    ).animate(CurvedAnimation(
-      parent: _pickupController,
-      curve: Curves.easeOutBack, // 튀어오르는 효과
-    ));
 
-    _arcAnimation = Tween<Offset>(
-      begin: widget.startPosition + const Offset(0, -20),
-      end: widget.endPosition + const Offset(0, -10), // 착지 전 살짝 위
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeInOutCubic, // 부드러운 호
-    ));
-
-    _landingAnimation = Tween<Offset>(
-      begin: widget.endPosition + const Offset(0, -10),
-      end: widget.endPosition,
-    ).animate(CurvedAnimation(
-      parent: _landingController,
-      curve: Curves.elasticOut, // 탄성 효과
-    ));
-
-    // 스케일 애니메이션 (카드가 살짝 커졌다가 원래 크기로)
-    _scaleAnimation = Tween<double>(
-      begin: 0.9,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeOutBack,
-    ));
-
-    // 회전 애니메이션 (살짝 기울어졌다가 원래 각도로)
-    _rotationAnimation = Tween<double>(
-      begin: -0.05, // 살짝 기울어서 시작
-      end: 0.0,     // 원래 각도로
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeOutBack,
-    ));
-
-    // 고도 애니메이션 (그림자 효과용)
-    _elevationAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeInOut,
-    ));
-  }
-
-  void _calculateMidPoint() {
-    // 호를 그리기 위한 중간 지점 계산
-    final dx = widget.endPosition.dx - widget.startPosition.dx;
-    final dy = widget.endPosition.dy - widget.startPosition.dy;
-    final midX = widget.startPosition.dx + dx * 0.5;
-    final midY = widget.startPosition.dy + dy * 0.5 - 50; // 호의 높이
-    _midPoint = Offset(midX, midY);
-  }
-
-  Future<void> _startDealAnimation() async {
-    print('🎯 카드더미 재사용 분배 애니메이션 시작: ${widget.card.month}월 ${widget.card.name} (순서: ${widget.cardIndex})');
-    
-    // 1단계: 집기
-    await _pickupPhase();
-    
-    // 2단계: 호를 그리며 이동
-    await _arcPhase();
-    
-    // 3단계: 착지
-    await _landingPhase();
-    
-    // 4단계: 안정화
-    await _settlingPhase();
-    
-    // 완료
-    widget.onComplete?.call();
-  }
-
-  Future<void> _pickupPhase() async {
-    print('🎯 1단계: 집기 (카드더미 재사용)');
-    setState(() {
-      currentPhase = DealPhase.pickup;
-    });
-    
-    _pickupController.forward();
-    await Future.delayed(const Duration(milliseconds: 200));
-  }
-
-  Future<void> _arcPhase() async {
-    print('🎯 2단계: 호를 그리며 이동 (카드더미 재사용)');
-    setState(() {
-      currentPhase = DealPhase.arc;
-    });
-    
-    _arcController.forward();
-    await Future.delayed(const Duration(milliseconds: 400));
-  }
-
-  Future<void> _landingPhase() async {
-    print('🎯 3단계: 착지 (카드더미 재사용)');
-    setState(() {
-      currentPhase = DealPhase.landing;
-    });
-    
-    _landingController.forward();
-    await Future.delayed(const Duration(milliseconds: 150));
-  }
-
-  Future<void> _settlingPhase() async {
-    print('🎯 4단계: 안정화 (카드더미 재사용)');
-    setState(() {
-      currentPhase = DealPhase.settling;
-    });
-    
-    _settlingController.forward();
-    await Future.delayed(const Duration(milliseconds: 100));
-  }
-
-  @override
-  void dispose() {
-    _pickupController.dispose();
-    _arcController.dispose();
-    _landingController.dispose();
-    _settlingController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge([
-        _pickupController,
-        _arcController,
-        _landingController,
-        _settlingController,
-      ]),
-      builder: (context, child) {
-        // 현재 단계에 따른 위치 계산
-        Offset currentPosition;
-        double currentScale = 1.0;
-        double currentRotation = 0.0;
-        double currentElevation = 0.0;
-        
-        switch (currentPhase) {
-          case DealPhase.pickup:
-            currentPosition = _pickupAnimation.value;
-            currentScale = 0.95;
-            break;
-          case DealPhase.arc:
-            currentPosition = _arcAnimation.value;
-            currentScale = _scaleAnimation.value;
-            currentRotation = _rotationAnimation.value;
-            currentElevation = _elevationAnimation.value;
-            break;
-          case DealPhase.landing:
-            currentPosition = _landingAnimation.value;
-            currentScale = 1.0;
-            currentRotation = 0.0;
-            currentElevation = 0.0;
-            break;
-          case DealPhase.settling:
-            currentPosition = widget.endPosition;
-            currentScale = 1.0;
-            currentRotation = 0.0;
-            currentElevation = 0.0;
-            break;
-        }
-
-        return Positioned(
-          left: currentPosition.dx - (widget.cardWidth / 2),
-          top: currentPosition.dy - (widget.cardHeight / 2),
-          child: Transform.scale(
-            scale: currentScale,
-            child: Transform.rotate(
-              angle: currentRotation,
-              child: Container(
-                width: widget.cardWidth,
-                height: widget.cardHeight,
-                decoration: CardStyleManager.getCardDecoration().copyWith(
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.3 * (1 - currentElevation)),
-                      blurRadius: 8 + (currentElevation * 4),
-                      offset: Offset(2, 4 + (currentElevation * 2)),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    widget.isFaceUp ? widget.card.imageUrl : 'assets/cards/back.png',
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// 기존 카드더미 애니메이션 클래스 (호환성을 위해 유지)
-class _DeckCardAnimation extends StatefulWidget {
-  final GoStopCard card;
-  final bool isFaceUp;
-  final Offset startPosition;
-  final Offset endPosition;
-  final double cardWidth;
-  final double cardHeight;
-  final VoidCallback? onComplete;
-  final Duration duration;
-  final bool withTrail;
-  final int cardIndex; // 카드 순서 (타이밍 조절용)
-  final bool useDeckCard; // 카드더미의 실제 카드 사용 여부
-
-  const _DeckCardAnimation({
-    required this.card,
-    required this.isFaceUp,
-    required this.startPosition,
-    required this.endPosition,
-    required this.cardWidth,
-    required this.cardHeight,
-    this.onComplete,
-    this.duration = const Duration(milliseconds: 800),
-    this.withTrail = true,
-    required this.cardIndex,
-    this.useDeckCard = true, // 기본적으로 카드더미 카드 사용
-  });
-
-  @override
-  State<_DeckCardAnimation> createState() => _DeckCardAnimationState();
-}
-
-class _DeckCardAnimationState extends State<_DeckCardAnimation>
-    with TickerProviderStateMixin {
-  // 다단계 애니메이션 컨트롤러들
-  late AnimationController _pickupController;
-  late AnimationController _arcController;
-  late AnimationController _landingController;
-  late AnimationController _settlingController;
-  
-  // 애니메이션 값들
-  late Animation<Offset> _pickupAnimation;
-  late Animation<Offset> _arcAnimation;
-  late Animation<Offset> _landingAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _rotationAnimation;
-  late Animation<double> _elevationAnimation;
-  
-  // 현재 단계
-  DealPhase currentPhase = DealPhase.pickup;
-  
-  // 중간 지점 (호를 그리기 위한)
-  late Offset _midPoint;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeControllers();
-    _calculateMidPoint();
-    _startDealAnimation();
-  }
-
-  void _initializeControllers() {
-    // 1단계: 집기 (카드더미에서 살짝 들어올리기)
-    _pickupController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    
-    // 2단계: 호를 그리며 이동
-    _arcController = AnimationController(
-      duration: const Duration(milliseconds: 400),
-      vsync: this,
-    );
-    
-    // 3단계: 착지
-    _landingController = AnimationController(
-      duration: const Duration(milliseconds: 150),
-      vsync: this,
-    );
-    
-    // 4단계: 안정화
-    _settlingController = AnimationController(
-      duration: const Duration(milliseconds: 100),
-      vsync: this,
-    );
-
-    // 애니메이션 설정
-    _pickupAnimation = Tween<Offset>(
-      begin: widget.startPosition,
-      end: widget.startPosition + const Offset(0, -20), // 살짝 들어올리기
-    ).animate(CurvedAnimation(
-      parent: _pickupController,
-      curve: Curves.easeOutBack, // 튀어오르는 효과
-    ));
-
-    _arcAnimation = Tween<Offset>(
-      begin: widget.startPosition + const Offset(0, -20),
-      end: widget.endPosition + const Offset(0, -10), // 착지 전 살짝 위
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeInOutCubic, // 부드러운 호
-    ));
-
-    _landingAnimation = Tween<Offset>(
-      begin: widget.endPosition + const Offset(0, -10),
-      end: widget.endPosition,
-    ).animate(CurvedAnimation(
-      parent: _landingController,
-      curve: Curves.elasticOut, // 탄성 효과
-    ));
-
-    // 스케일 애니메이션 (카드가 살짝 커졌다가 원래 크기로)
-    _scaleAnimation = Tween<double>(
-      begin: 0.9,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeOutBack,
-    ));
-
-    // 회전 애니메이션 (살짝 기울어졌다가 원래 각도로)
-    _rotationAnimation = Tween<double>(
-      begin: -0.05, // 살짝 기울어서 시작
-      end: 0.0,     // 원래 각도로
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeOutBack,
-    ));
-
-    // 고도 애니메이션 (그림자 효과용)
-    _elevationAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _arcController,
-      curve: Curves.easeInOut,
-    ));
-  }
-
-  void _calculateMidPoint() {
-    // 호를 그리기 위한 중간 지점 계산
-    final dx = widget.endPosition.dx - widget.startPosition.dx;
-    final dy = widget.endPosition.dy - widget.startPosition.dy;
-    final midX = widget.startPosition.dx + dx * 0.5;
-    final midY = widget.startPosition.dy + dy * 0.5 - 50; // 호의 높이
-    _midPoint = Offset(midX, midY);
-  }
-
-  Future<void> _startDealAnimation() async {
-    print('🎯 카드 분배 애니메이션 시작: ${widget.card.month}월 ${widget.card.name} (순서: ${widget.cardIndex})');
-    
-    // 1단계: 집기
-    await _pickupPhase();
-    
-    // 2단계: 호를 그리며 이동
-    await _arcPhase();
-    
-    // 3단계: 착지
-    await _landingPhase();
-    
-    // 4단계: 안정화
-    await _settlingPhase();
-    
-    // 완료
-    widget.onComplete?.call();
-  }
-
-  Future<void> _pickupPhase() async {
-    print('🎯 1단계: 집기');
-    setState(() {
-      currentPhase = DealPhase.pickup;
-    });
-    
-    _pickupController.forward();
-    await Future.delayed(const Duration(milliseconds: 200));
-  }
-
-  Future<void> _arcPhase() async {
-    print('🎯 2단계: 호를 그리며 이동');
-    setState(() {
-      currentPhase = DealPhase.arc;
-    });
-    
-    _arcController.forward();
-    await Future.delayed(const Duration(milliseconds: 400));
-  }
-
-  Future<void> _landingPhase() async {
-    print('🎯 3단계: 착지');
-    setState(() {
-      currentPhase = DealPhase.landing;
-    });
-    
-    _landingController.forward();
-    await Future.delayed(const Duration(milliseconds: 150));
-  }
-
-  Future<void> _settlingPhase() async {
-    print('🎯 4단계: 안정화');
-    setState(() {
-      currentPhase = DealPhase.settling;
-    });
-    
-    _settlingController.forward();
-    await Future.delayed(const Duration(milliseconds: 100));
-  }
-
-  @override
-  void dispose() {
-    _pickupController.dispose();
-    _arcController.dispose();
-    _landingController.dispose();
-    _settlingController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge([
-        _pickupController,
-        _arcController,
-        _landingController,
-        _settlingController,
-      ]),
-      builder: (context, child) {
-        // 현재 단계에 따른 위치 계산
-        Offset currentPosition;
-        double currentScale = 1.0;
-        double currentRotation = 0.0;
-        double currentElevation = 0.0;
-        
-        switch (currentPhase) {
-          case DealPhase.pickup:
-            currentPosition = _pickupAnimation.value;
-            currentScale = 0.95;
-            break;
-          case DealPhase.arc:
-            currentPosition = _arcAnimation.value;
-            currentScale = _scaleAnimation.value;
-            currentRotation = _rotationAnimation.value;
-            currentElevation = _elevationAnimation.value;
-            break;
-          case DealPhase.landing:
-            currentPosition = _landingAnimation.value;
-            currentScale = 1.0;
-            currentRotation = 0.0;
-            currentElevation = 0.0;
-            break;
-          case DealPhase.settling:
-            currentPosition = widget.endPosition;
-            currentScale = 1.0;
-            currentRotation = 0.0;
-            currentElevation = 0.0;
-            break;
-        }
-
-        return Positioned(
-          left: currentPosition.dx - (widget.cardWidth / 2),
-          top: currentPosition.dy - (widget.cardHeight / 2),
-          child: Transform.scale(
-            scale: currentScale,
-            child: Transform.rotate(
-              angle: currentRotation,
-              child: Container(
-                width: widget.cardWidth,
-                height: widget.cardHeight,
-                decoration: CardStyleManager.getCardDecoration().copyWith(
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.3 * (1 - currentElevation)),
-                      blurRadius: 8 + (currentElevation * 4),
-                      offset: Offset(2, 4 + (currentElevation * 2)),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    widget.isFaceUp ? widget.card.imageUrl : 'assets/cards/back.png',
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
 
 // 셔플 애니메이션 위젯
 class ShuffleAnimationWidget extends StatefulWidget {

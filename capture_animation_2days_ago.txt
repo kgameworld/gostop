@@ -1,0 +1,479 @@
+commit a408d61207bfcf4edaab1c15d9c9f18e7a97aad1
+Author: kgameworld <jesuising1@gmail.com>
+Date:   Tue Jul 15 00:31:47 2025 +0200
+
+    fix: 罹≪쿂 ?좊땲硫붿씠??fallback 醫뚰몴(?좊졊 移대뱶) ?꾩긽 ?꾩쟾 ?닿껐 - ?덉씠?꾩썐 誘몄셿??1?꾨젅???湲????ㅼ젣 ?꾩튂濡??ш퀎??
+diff --git a/lib/screens/game_page.dart b/lib/screens/game_page.dart
+index ed4b166..ff6af29 100644
+--- a/lib/screens/game_page.dart
++++ b/lib/screens/game_page.dart
+@@ -43,6 +43,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+   // ?좊땲硫붿씠???곹깭 愿由?   List<Widget> activeAnimations = [];
+   bool isAnimating = false;
++  // 理쒓렐 ?뚮젅?대맂 移대뱶 ?꾩튂(id -> Offset). ?꾨뱶??Key媛 ?꾩쭅 ?놁쓣 ???ъ슜
++  final Map<int, Offset> _recentCardPositions = {};
+   
+   // ?좊땲硫붿씠???
+   final AnimationPool animationPool = AnimationPool();
+@@ -72,7 +74,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+     engine = MatgoEngine(deckManager);
+     
+     // ?좊땲硫붿씠???대깽??由ъ뒪???ㅼ젙
+-    // engine.setAnimationListener(_handleAnimationEvent);
++    engine.setAnimationListener(_handleAnimationEvent);
+     
+     // ??醫낅즺 ??UI ?낅뜲?댄듃 肄쒕갚 ?ㅼ젙
+     engine.onTurnEnd = () {
+@@ -133,28 +135,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+         }
+         break;
+       case AnimationEventType.cardCapture:
+-        // 癒뱀? 移대뱶??癒뱀? 移대뱶 ?곸뿭?쇰줈 ?대룞
++        // 移대뱶?ㅼ쓣 ?쒖꽌?濡??띾뱷 ?곸뿭?쇰줈 ?대룞?섎뒗 ?좊땲硫붿씠??         final cards = event.data['cards'] as List<GoStopCard>;
+         final player = event.data['player'] as int;
+-        final fromOffset = _getCardPosition('field', cards.first);
+-        final toOffset = _getCardPosition('captured', cards.first, playerId: player);
+-        setState(() {
+-          isAnimating = true;
+-          activeAnimations.add(
+-            CardCaptureAnimation(
+-              cardImages: cards.map((c) => c.imageUrl).toList(),
+-              startPosition: fromOffset,
+-              endPosition: toOffset,
+-              onComplete: () {
+-                setState(() {
+-                  activeAnimations.removeWhere((anim) => anim is CardCaptureAnimation);
+-                  if (activeAnimations.isEmpty) isAnimating = false;
+-                });
+-              },
+-              duration: const Duration(milliseconds: 600),
+-            ),
+-          );
+-        });
++        _playCardCaptureAnimation(cards, player);
+         break;
+       case AnimationEventType.specialEffect:
+       case AnimationEventType.ppeok:
+@@ -164,29 +148,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+         _handleSpecialEffect(event.data);
+         break;
+       case AnimationEventType.bonusCard:
+-        final card = event.data['card'] as GoStopCard;
+-        final player = event.data['player'] as int;
+-        // 移대뱶?붾??먯꽌 ?ㅼ쭛??蹂대꼫?ㅼ뭅???좊땲硫붿씠??(?뚮젅?댁뼱/AI 怨듯넻)
+-        final fromOffset = _getCardPosition('deck', card);
+-        // ?좎떆 ?꾨뱶 寃뱀묠 ?꾩튂濡??대룞 ?? _endTurn ?먯꽌 罹≪쿂 ?좊땲硫붿씠?섏씠 ?ㅼ떆 ?ㅽ뻾??-        final toOffset = _getCardPosition('field', card);
+-        setState(() {
+-          isAnimating = true;
+-          activeAnimations.add(
+-            CardCaptureAnimation(
+-              cardImages: [card.imageUrl],
+-              startPosition: fromOffset,
+-              endPosition: toOffset,
+-              onComplete: () {
+-                setState(() {
+-                  activeAnimations.removeWhere((anim) => anim is CardCaptureAnimation);
+-                  if (activeAnimations.isEmpty) isAnimating = false;
+-                });
+-              },
+-              duration: const Duration(milliseconds: 600),
+-            ),
+-          );
+-        });
++        // 蹂대꼫?ㅼ뭅???좊땲硫붿씠???쒓굅 - 利됱떆 泥섎━
+         break;
+     }
+   }
+@@ -215,39 +177,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+   }
+ 
+   void _handleSpecialEffect(Map<String, dynamic> data) {
+-    final effect = data['effect'] as String;
+-    final player = data['player'] as int;
+-    
+-    setState(() {
+-      isAnimating = true;
+-      
+-      // ?뱀닔 ?④낵 ?좊땲硫붿씠??-      activeAnimations.add(
+-        animationPool.getSpecialEffectAnimation(
+-          effectType: effect,
+-          onComplete: () {
+-            setState(() {
+-              activeAnimations.removeWhere((anim) => anim is SpecialEffectAnimation);
+-            });
+-          },
+-        ),
+-      );
+-      
+-      // ?붾㈃ ?뚰떚???④낵
+-      activeAnimations.add(
+-        animationPool.getScreenParticleEffect(
+-          effectType: effect,
+-          onComplete: () {
+-            setState(() {
+-              activeAnimations.removeWhere((anim) => anim is ScreenParticleEffect);
+-              if (activeAnimations.isEmpty) {
+-                isAnimating = false;
+-              }
+-            });
+-          },
+-        ),
+-      );
+-    });
++    // ?뱀닔 ?④낵 ?좊땲硫붿씠???댄럺??鍮꾪솢?깊솕
++    return;
+   }
+ 
+   // 湲댁옣媛?紐⑤뱶 ?쒖옉
+@@ -376,15 +307,37 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+         if (key is GlobalKey && key.currentContext != null) {
+           final RenderBox cardBox = key.currentContext!.findRenderObject() as RenderBox;
+           final baseOffset = cardBox.localToGlobal(Offset.zero);
+-          // 留ㅼ튂媛 ?덉쑝硫?寃뱀묠 ?꾩튂濡? ?놁쑝硫??먮옒 ?꾩튂濡?(?좊땲硫붿씠?섍낵 寃뱀묠 ?듯빀)
+-          const double cardWidth = 48.0;
+-          const double cardHeight = 72.0;
+-          const double overlapOffsetX = cardWidth * 0.3; // 移대뱶 ?덈퉬??30% 寃뱀묠
+-          const double overlapOffsetY = cardHeight * 0.1; // 移대뱶 ?믪씠??10% 寃뱀묠
+-          destinationOffset = Offset(
+-            baseOffset.dx + overlapOffsetX,
+-            baseOffset.dy + overlapOffsetY,
+-          );
++          // 罹≪쿂 ?좊땲硫붿씠?섏쓣 ?꾪빐 湲곗〈 ?꾨뱶 移대뱶 ?꾩튂 罹먯떆
++          _recentCardPositions[matchCard.id] = baseOffset;
++          // ========= 蹂대뱶??移대뱶 ?ш린 / 寃뱀묠 ?ㅽ봽?뗪낵 ?숈씪 怨듭떇 =========
++          final Size screenSize = MediaQuery.of(context).size;
++          final double minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
++          final double handCardWidth = minSide * 0.13;
++          final double fieldCardWidth = handCardWidth * 0.8;
++          final double fieldCardHeight = fieldCardWidth * 1.5;
++          final double overlapOffsetX = fieldCardWidth * 0.375; // 蹂대뱶? ?숈씪 鍮꾩쑉
++          final double overlapOffsetY = fieldCardHeight * 0.111;
++
++          // 媛숈? ??移대뱶??以??꾩옱 ?꾨뱶?먯꽌 媛????=媛??寃뱀묠??留롮씠 ?? 移대뱶???꾩튂瑜?李얜뒗??
++          Offset topMostOffset = baseOffset;
++          int maxLayer = -1;
++          for (final fc in engine.getField()) {
++            if (fc.month != card.month || fc.isBonus) continue;
++            final GlobalKey? fk = fieldCardKeys[fc.id.toString()] as GlobalKey?;
++            if (fk != null && fk.currentContext != null) {
++              final RenderBox fb = fk.currentContext!.findRenderObject() as RenderBox;
++              final Offset off = fb.localToGlobal(Offset.zero);
++              // ?덉씠?대뒗 x(?먮뒗 y) 利앷???/ overlap ?쇰줈 怨꾩궛 媛??+              final int layer = ((off.dx - baseOffset.dx) / overlapOffsetX).round();
++              if (layer > maxLayer) {
++                maxLayer = layer;
++                topMostOffset = off;
++              }
++            }
++          }
++
++          // ??移대뱶??topMostOffset 諛붾줈 ???덉씠?댁뿉 ?볦씤??
++          destinationOffset = topMostOffset.translate(overlapOffsetX, overlapOffsetY);
+         } else {
+           destinationOffset = _getCardPosition('field', card);
+         }
+@@ -393,6 +346,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+       }
+     }
+ 
++    // 留ㅼ튂 ?좊땲硫붿씠?섏뿉???뺥솗???쒖옉 醫뚰몴瑜??꾪빐 誘몃━ ???+    _recentCardPositions[card.id] = destinationOffset;
++
+     final completer = Completer<void>();
+     _playCardWithAnimation(card, fromOffset, destinationOffset, () async {
+       // ?좊땲硫붿씠???꾨즺 = 寃뱀묠 ?곗텧 ?꾨즺 (?섎굹???곗냽???숈옉)
+@@ -443,15 +399,58 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+         deckOffset = box.localToGlobal(Offset.zero);
+       }
+       
+-      // ?꾨뱶 ?꾩갑 ?꾩튂 怨꾩궛 (GlobalKey ?ъ슜 - ?섎굹??湲곗? 醫뚰몴怨?
++      // ?꾨뱶 ?꾩갑 ?꾩튂 怨꾩궛 (寃뱀묠 ?ㅽ깮 怨좊젮)
+       Offset? fieldOffset;
++
+       if (drawnCard.month > 0 && drawnCard.month <= 12) {
+-        final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
+-        if (groupKeys != null && drawnCard.month - 1 < groupKeys.length) {
+-          final groupKey = groupKeys[drawnCard.month - 1];
+-          if (groupKey is GlobalKey && groupKey.currentContext != null) {
+-            final RenderBox groupBox = groupKey.currentContext!.findRenderObject() as RenderBox;
+-            fieldOffset = groupBox.localToGlobal(Offset.zero);
++        // 1) ?대? 媛숈? ??移대뱶媛 ?덈뒗 寃쎌슦 ??理쒖긽??移대뱶 怨꾩궛
++        final List<GoStopCard> sameMonth = engine.getField()
++            .where((c) => c.month == drawnCard.month && !c.isBonus)
++            .toList();
++
++        if (sameMonth.isNotEmpty) {
++          // 湲곗?????泥?踰덉㎏ 移대뱶??baseOffset
++          final firstKey = fieldCardKeys[sameMonth.first.id.toString()];
++          if (firstKey is GlobalKey && firstKey.currentContext != null) {
++            final RenderBox baseBox = firstKey.currentContext!.findRenderObject() as RenderBox;
++            final Offset baseOffset = baseBox.localToGlobal(Offset.zero);
++
++            // ?붾㈃ ?ш린 湲곕컲 移대뱶/寃뱀묠 ?ш린 怨꾩궛 (蹂대뱶? ?숈씪)
++            final Size scr = MediaQuery.of(context).size;
++            final double minSide = scr.width < scr.height ? scr.width : scr.height;
++            final double handW = minSide * 0.13;
++            final double fieldW = handW * 0.8;
++            final double fieldH = fieldW * 1.5;
++            final double oX = fieldW * 0.375;
++            final double oY = fieldH * 0.111;
++
++            // 理쒖긽???덉씠???먯깋
++            Offset topOffset = baseOffset;
++            int topLayer = -1;
++            for (final fc in sameMonth) {
++              final key = fieldCardKeys[fc.id.toString()];
++              if (key is GlobalKey && key.currentContext != null) {
++                final RenderBox bx = key.currentContext!.findRenderObject() as RenderBox;
++                final Offset off = bx.localToGlobal(Offset.zero);
++                final int layer = ((off.dx - baseOffset.dx) / oX).round();
++                if (layer > topLayer) {
++                  topLayer = layer;
++                  topOffset = off;
++                }
++              }
++            }
++
++            fieldOffset = topOffset.translate(oX, oY);
++          }
++        } else {
++          // 2) 媛숈? ??移대뱶 ?놁쓬 ??鍮?洹몃９ ?꾩튂 ?ъ슜
++          final groupKeys = boardKey.currentState?.getEmptyGroupKeys();
++          if (groupKeys != null && drawnCard.month - 1 < groupKeys.length) {
++            final groupKey = groupKeys[drawnCard.month - 1];
++            if (groupKey is GlobalKey && groupKey.currentContext != null) {
++              final RenderBox groupBox = groupKey.currentContext!.findRenderObject() as RenderBox;
++              fieldOffset = groupBox.localToGlobal(Offset.zero);
++            }
+           }
+         }
+       }
+@@ -477,6 +476,8 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+                   isAnimating = false;
+                 }
+               });
++              // ?좊땲硫붿씠???꾨즺 ???꾨뱶???볦씤 移대뱶 醫뚰몴瑜?cache (GlobalKey媛 ?꾩쭅 ?놁쓣 ???덉쓬)
++              _recentCardPositions[drawnCard.id] = fieldOffset!;
+               completer.complete();
+             },
+             duration: const Duration(milliseconds: 900),
+@@ -828,13 +829,21 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+ 
+   // ?띾뱷??移대뱶瑜?UI???쒖떆?섍린 ?꾪빐 ??낅퀎濡?洹몃９?뷀븯???ы띁 ?⑥닔
+   Map<String, List<String>> groupCapturedByType(List<dynamic> cards) {
+-    final Map<String, List<String>> grouped = {};
++    // ??긽 紐⑤뱺 洹몃９??議댁옱?섎룄濡?珥덇린??+    final Map<String, List<String>> grouped = {
++      '愿?: [],
++      '??: [],
++      '?숇Ъ': [],
++      '??: [],
++    };
+     for (final card in cards) {
+-      final type = card.type ?? '湲고?';
+-      grouped.putIfAbsent(type, () => <String>[]);
+-      grouped[type]!.add(card.imageUrl.toString());
++      // '?? ??낅룄 '?숇Ъ'濡?留ㅽ븨
++      final type = (card.type == '??) ? '?숇Ъ' : (card.type ?? '湲고?');
++      if (grouped.containsKey(type)) {
++        grouped[type]!.add(card.imageUrl.toString());
++      }
+     }
+-    return grouped.map((k, v) => MapEntry(k, v.map((e) => e.toString()).toList()));
++    return grouped;
+   }
+ 
+   // ?덉쟾?섍쾶 isAwaitingGoStop ?몄텧
+@@ -984,6 +993,117 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+     _playCardWithAnimation(card, fromOffset, toOffset, onComplete);
+   }
+ 
++  // 移대뱶?ㅼ쓣 ?쒖꽌?濡??띾뱷 ?곸뿭?쇰줈 ?대룞?섎뒗 ?좊땲硫붿씠??+  void _playCardCaptureAnimation(List<GoStopCard> cards, int player) async {
++    // 移대뱶 ?곗꽑?쒖쐞: 愿?> ??> ?숇Ъ > ???쒖꽌濡??뺣젹
++    cards.sort((a, b) {
++      final priorityA = _getCardPriority(a);
++      final priorityB = _getCardPriority(b);
++      return priorityA.compareTo(priorityB);
++    });
++
++    final playerIdx = player - 1;
++
++    // 媛?移대뱶瑜??쒖꽌?濡??좊땲硫붿씠???ㅽ뻾
++    for (int i = 0; i < cards.length; i++) {
++      final card = cards[i];
++      final fromOffset = _getCardPosition('field', card);
++      // 罹≪쿂 洹몃９ ?덉씠?꾩썐???꾩쭅 以鍮꾨릺吏 ?딆? 寃쎌슦 fallback 醫뚰몴(?붾㈃ 以묒븰 ?섎떒)媛 諛섑솚?????덉쓬
++      // ?대윴 寃쎌슦 ???꾨젅???ㅼ뿉 ?ㅼ떆 怨꾩궛?섏뿬 ?ㅼ젣 罹≪쿂 ?곸뿭 醫뚰몴瑜??ъ슜?섎룄濡?蹂댁젙?쒕떎.
++      Size _screenSize = MediaQuery.of(context).size;
++      Offset toOffset = _getCardPosition('captured', card, playerId: player);
++
++      bool _isFallbackOffset(Offset o) {
++        // player 1(?섎떒) fallback: ?붾㈃ ?섎떒 以묒븰 洹쇱쿂, player 2(?곷떒) fallback: ?붾㈃ ?곷떒 以묒븰 洹쇱쿂
++        if (player == 1) {
++          return (o.dx - (_screenSize.width / 2 - 48)).abs() < 2 &&
++                 (o.dy - (_screenSize.height - 120)).abs() < 2;
++        } else {
++          return (o.dx - (_screenSize.width / 2 - 48)).abs() < 2 &&
++                 (o.dy - 120).abs() < 2;
++        }
++      }
++
++      if (_isFallbackOffset(toOffset)) {
++        // ???꾨젅???湲????ш퀎??(?덉씠?꾩썐 ?꾨즺 ?湲?
++        await Future.delayed(const Duration(milliseconds: 16));
++        toOffset = _getCardPosition('captured', card, playerId: player);
++      }
++
++      // ?띾뱷 移대뱶 ?곸뿭??移대뱶 ?ш린 怨꾩궛 (capturedOverlapRow? ?숈씪 怨듭떇)
++      final screenSize = MediaQuery.of(context).size;
++      final minSide = screenSize.width < screenSize.height ? screenSize.width : screenSize.height;
++      final capturedCardWidth = minSide * 0.0455;
++      final capturedCardHeight = capturedCardWidth * 1.5;
++      
++      // 媛?移대뱶留덈떎 200ms 媛꾧꺽?쇰줈 ?좊땲硫붿씠???ㅽ뻾
++      if (i > 0) {
++        await Future.delayed(const Duration(milliseconds: 200));
++      }
++      
++      // ?먮낯 ?꾨뱶 移대뱶 利됱떆 ?쒓굅 + ?좊땲硫붿씠???꾩젽 異붽?瑜???踰덉쓽 setState濡??듯빀
++      setState(() {
++        engine.deckManager.fieldCards.removeWhere((c) => c.id == card.id);
++        isAnimating = true;
++
++        // 怨좎쑀 ?ㅻ줈 ?좊땲硫붿씠???꾩젽 ?앸퀎
++        final uniqKey = UniqueKey();
++
++        final anim = SimpleCardMoveAnimation(
++          cardImage: card.imageUrl,
++          startPosition: fromOffset,
++          endPosition: toOffset,
++          cardWidth: capturedCardWidth,
++          cardHeight: capturedCardHeight,
++          onComplete: () {
++            // ?좊땲硫붿씠???꾨즺 ???대떦 移대뱶留?利됱떆 ?띾뱷 由ъ뒪?몄뿉 異붽? (遺덈? 由ъ뒪??媛깆떊)
++            final current = engine.deckManager.capturedCards[playerIdx] ?? [];
++            engine.deckManager.capturedCards[playerIdx] = List<GoStopCard>.from(current)..add(card);
++
++            // pendingCaptured 由ъ뒪???뺣━
++            engine.pendingCaptured.removeWhere((c) => c.id == card.id);
++
++            // ?먯떊(Key)留??쒓굅?섏뿬 ?ㅻⅨ ?좊땲硫붿씠?섏뿉 ?곹뼢 ?녿룄濡???+            setState(() {
++              activeAnimations.removeWhere((w) => w.key == uniqKey);
++              if (activeAnimations.isEmpty) isAnimating = false;
++            });
++          },
++          duration: const Duration(milliseconds: 500),
++        );
++
++        // KeyedSubtree濡?媛먯떥??List<Widget>?먯꽌??怨좎쑀 ?앸퀎 媛??+        activeAnimations.add(KeyedSubtree(key: uniqKey, child: anim));
++      });
++    }
++    // 紐⑤뱺 ?좊땲硫붿씠?섏씠 ?앸궃 ??蹂꾨룄??_moveCardsToCaptured ?몄텧? ?꾩슂 ?놁쓬
++  }
++
++  // 移대뱶 ?곗꽑?쒖쐞 怨꾩궛 (愿?> ??> ?숇Ъ > ??
++  int _getCardPriority(GoStopCard card) {
++    if (card.type == '愿?) return 0;
++    if (card.type == '??) return 1;
++    if (card.type == '?숇Ъ') return 2;
++    if (card.type == '??) return 3;
++    return 4;
++  }
++
++  // ?좊땲硫붿씠???꾨즺 ???ㅼ젣 移대뱶 ?곗씠?곕? ?띾뱷 ?곸뿭?쇰줈 ?대룞
++  void _moveCardsToCaptured(List<GoStopCard> cards, int player) {
++    final playerIdx = player - 1;
++    
++    // ?좊땲硫붿씠?섏뿉 ?꾨떖??移대뱶?ㅼ쓣 ?띾뱷 移대뱶濡??대룞
++    engine.deckManager.capturedCards[playerIdx]?.addAll(cards);
++    // ?꾨뱶?먯꽌 ?띾뱷 移대뱶 ?쒓굅
++    engine.deckManager.fieldCards.removeWhere((c) => cards.any((rc) => rc.id == c.id));
++    
++    // pendingCaptured?먯꽌???대떦 移대뱶???쒓굅
++    engine.pendingCaptured.removeWhere((c) => cards.any((rc) => rc.id == c.id));
++    
++    // UI ?낅뜲?댄듃
++    setState(() {});
++  }
++
+   // 移대뱶 ?꾩튂 怨꾩궛 ?⑥닔 (?ㅼ젣 UI ?꾩튂??留욊쾶 ?섏젙)
+   Offset _getCardPosition(String area, GoStopCard card, {int? playerId}) {
+     final size = MediaQuery.of(context).size;
+@@ -991,8 +1111,15 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+     
+     switch (area) {
+       case 'hand':
+-        // ?뚮젅?댁뼱 ?먰뙣???붾㈃ ?섎떒 以묒븰
+-        position = Offset(size.width / 2 - 48, size.height - 200);
++        Offset? handOffset;
++        // GoStopBoard?먯꽌 ?먰뙣 移대뱶 GlobalKey 媛?몄삤湲?+        final GlobalKey? handKey = boardKey.currentState?.getHandCardKeyById(card.id.toString());
++        if (handKey != null && handKey.currentContext != null) {
++          final RenderBox box = handKey.currentContext!.findRenderObject() as RenderBox;
++          handOffset = box.localToGlobal(Offset.zero);
++        }
++        // fallback: ?붾㈃ ?섎떒 以묒븰 洹쇱궗媛?+        position = handOffset ?? Offset(size.width / 2 - 48, size.height - 200);
+         break;
+       case 'ai_hand':
+         // AI ?먰뙣???붾㈃ ?곷떒 以묒븰
+@@ -1020,27 +1147,48 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
+           }
+         }
+ 
+-        // 3) 怨꾩궛??fallback
++        // 3) recentCardPositions????λ맂 醫뚰몴 ?ъ슜 (?꾨뱶 ?ㅺ? ?꾩쭅 ?놁쓣 寃쎌슦)
++        if (cardOffset == null) {
++          cardOffset = _recentCardPositions[card.id];
++        }
++
++        // 4) 怨꾩궛??fallback
+         position = cardOffset ?? _getActualFieldPosition(card);
+         break;
+       case 'captured':
+-        Offset? capturedOffset;
+-        // ?뚮젅?댁뼱 援щ텇: AI(2)??AI ?띾뱷 ?곸뿭, ?뚮젅?댁뼱(1)???뚮젅?댁뼱 ?띾뱷 ?곸뿭
+-        final GlobalKey? piKey = playerId == 2 
+-          ? boardKey.currentState?.getAiCapturedTypeKey('??)
+-          : boardKey.currentState?.getCapturedTypeKey('??);
+-        if (piKey != null && piKey.currentContext != null) {
+-          final RenderBox box = piKey.currentContext!.findRenderObject() as RenderBox;
+-          capturedOffset = box.localToGlobal(Offset.zero);
++        // 移대뱶 ??낅퀎 洹몃９ Key 寃곗젙
++        String groupType = card.type;
++        if (groupType == '??) groupType = '?숇Ъ';
++
++        Offset? groupOffset;
++        final GlobalKey? groupKey = playerId == 2
++            ? boardKey.currentState?.getAiCapturedTypeKey(groupType)
++            : boardKey.currentState?.getCapturedTypeKey(groupType);
++
++        if (groupKey != null && groupKey.currentContext != null) {
++          final RenderBox box = groupKey.currentContext!.findRenderObject() as RenderBox;
++          groupOffset = box.localToGlobal(Offset.zero);
+         }
+-        // fallback ?꾩튂???뚮젅?댁뼱 援щ텇
+-        if (capturedOffset == null) {
+-          position = playerId == 2 
+-            ? Offset(size.width / 2 - 48, 120) // AI ?띾뱷 ?곸뿭 (?곷떒)
+-            : Offset(size.width / 2 - 48, size.height - 120); // ?뚮젅?댁뼱 ?띾뱷 ?곸뿭 (?섎떒)
+-        } else {
+-          position = capturedOffset;
++
++        // fallback ?꾩튂???뚮젅?댁뼱 援щ텇 (??듭쟻???꾩튂)
++        position = groupOffset ?? (playerId == 2
++            ? Offset(size.width / 2 - 48, 120)
++            : Offset(size.width / 2 - 48, size.height - 120));
++
++        // ?? 寃뱀묠 offset 蹂댁젙(?대? 蹂댁쑀??移대뱶 ??留뚰겮 ?ㅻⅨ履쎌쑝濡??대룞) ??
++        final capturedList = engine.deckManager.capturedCards[(playerId ?? 1) - 1] ?? [];
++        final grouped = groupCapturedByType(capturedList);
++        int idxInGroup = 0;
++        if (grouped.containsKey(groupType)) {
++          idxInGroup = grouped[groupType]!.length; // ?꾩옱 蹂댁쑀 ??(??移대뱶 index)
+         }
++
++        // 移대뱶 ?? overlapX 怨꾩궛 罹≪쿂??移대뱶 UI? ?숈씪 怨듭떇
++        final minSide = size.width < size.height ? size.width : size.height;
++        final cWidth = minSide * 0.0455;
++        final overlapX = cWidth * 0.45;
++
++        position = position.translate(idxInGroup * overlapX, 0);
+         break;
+       case 'ai_captured':
+         // AI??癒뱀? 移대뱶 ?곸뿭 ?꾩튂 (?곷떒)
