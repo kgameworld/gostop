@@ -58,6 +58,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
     ).then((_) => _loadCoins());
   }
 
+  void _openShop() {
+    // 코인샵 화면으로 이동
+    Navigator.pushNamed(context, '/shop');
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -204,6 +209,17 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                 fontSize: 11 * 1.8,
                                 emojiSize: 22 * 1.8,
                               ),
+                              SizedBox(width: 18),
+                              _cardButton(
+                                label: AppLocalizations.of(context)!.shop,
+                                emoji: '🛒',
+                                onTap: () => _openShop(),
+                                enabled: true,
+                                width: 84 * 1.8,
+                                height: 63 * 1.8,
+                                fontSize: 11 * 1.8,
+                                emojiSize: 22 * 1.8,
+                              ),
                             ],
                           ),
                         ),
@@ -235,7 +251,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                                 context: context,
                                 builder: (context) => AlertDialog(
                                   title: Text(AppLocalizations.of(context)!.howToPlay),
-                                  content: Text(AppLocalizations.of(context)!.howToPlay + '...'),
+                                  content: Text('${AppLocalizations.of(context)!.howToPlay}...'),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(context),

@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'dart:async';
-import 'dart:math';
-import 'package:provider/provider.dart';
-import '../lobby_screen.dart';
-import '../providers/auth_provider.dart';
-import 'auth/login_page.dart';
+import '../widgets/ilosi_splash_painter.dart';
+import '../utils/sound_manager.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -14,125 +9,136 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends State<SplashScreen> 
     with TickerProviderStateMixin {
-  // 애니메이션 컨트롤러/애니메이션 (1단계)
-  late AnimationController _logoController;
-  late Animation<double> _logoOpacityAnim; // 투명도 효과용 애니메이션
-  // 나머지 단계 애니메이션 컨트롤러/변수
-  late AnimationController _titleController;
-  late AnimationController _themeController;
-  late AnimationController _tapController;
-  late Animation<double> _titleScale;
-  late Animation<double> _titleGlow;
-  late Animation<double> _cardFlip;
-  late Animation<double> _cardRotation;
-  late Animation<double> _cardScale;
-  late Animation<double> _secondCardSlide;
-  late Animation<double> _petalOpacity;
-  late Animation<double> _tapOpacity;
-  
-  // 각 단계별 표시 여부
-  bool showStage1 = true;
-  // 2, 4단계 제거
-
-  // 카드 뒤집기 상태(2~3단계에서 공유)
-  double cardFlipValue = 0.0;
-  // 10월 사슴 카드 위치(3단계)
-  double deerCardOffset = 400.0;
-  // 타이틀 페이드인(2단계)
-  double titleOpacity = 0.0;
-  // 광채 효과(2단계)
-  double titleGlow = 0.0;
-
-  // 현재 단계
-  int _currentStage = 0;
-  bool _canTap = false;
+  late AnimationController _mainController;
+  late AnimationController _glowController;
+  late Animation<double> _mainAnimation;
+  late Animation<double> _glowAnimation;
   
   @override
   void initState() {
     super.initState();
-    _startStage1();
-  }
-
-  // 1단계: 전체 로고 부드럽게 페이드인
-  void _startStage1() async {
-    _logoController = AnimationController(
-      duration: const Duration(milliseconds: 1500), // 1.5초
+    
+    // 메인 애니메이션 컨트롤러 (글자 등장)
+    _mainController = AnimationController(
+      duration: const Duration(milliseconds: 3000),
       vsync: this,
     );
-    _logoOpacityAnim = CurvedAnimation(parent: _logoController, curve: Curves.easeInOut);
-    await _logoController.forward();
-    await Future.delayed(const Duration(milliseconds: 300));
-    // 1단계 끝나면 인증 상태에 따라 적절한 화면으로 이동
-    _navigateToNextScreen();
+    
+    // 글로우 애니메이션 컨트롤러 (빛나는 효과)
+    _glowController = AnimationController(
+      duration: const Duration(milliseconds: 2500),
+      vsync: this,
+    );
+    
+    // 메인 애니메이션 (글자별 순차 등장)
+    _mainAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _mainController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    // 글로우 애니메이션 (빛나는 효과)
+    _glowAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _glowController,
+      curve: Curves.easeInOut,
+    ));
+    
+    _startSplashAnimation();
   }
-
+  
+  void _startSplashAnimation() async {
+    try {
+      // 배경음악 재생 (오류 방지)
+      try {
+        SoundManager.instance.playBgm('lobby', volume: 0.4);
+      } catch (e) {
+        // 사운드 오류는 무시하고 계속 진행
+        print('Sound error: $e');
+      }
+      
+      // 메인 애니메이션 시작
+      await _mainController.forward();
+      
+      // 글로우 애니메이션 시작
+      await _glowController.forward();
+      
+      // 잠시 대기
+      await Future.delayed(const Duration(seconds: 1));
+      
+      // 로비 화면으로 이동
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/lobby');
+      }
+    } catch (e) {
+      // 애니메이션 오류시 바로 로비로 이동
+      print('Animation error: $e');
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/lobby');
+      }
+    }
+  }
+  
   @override
   void dispose() {
-    _logoController.dispose();
-    _titleController.dispose();
-    _themeController.dispose();
-    _tapController.dispose();
+    _mainController.dispose();
+    _glowController.dispose();
     super.dispose();
   }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFF1a1a2e), // 이미지와 동일한 배경색
       body: GestureDetector(
-        onTap: showStage1 ? _navigateToNextScreen : null,
+        onTap: () {
+          // 터치하면 바로 로비로 이동
+          Navigator.of(context).pushReplacementNamed('/lobby');
+        },
         child: Stack(
           children: [
-            // 1단계: ILOSI 로고
-            if (showStage1)
-              AnimatedBuilder(
-                animation: _logoOpacityAnim,
-                builder: (context, child) {
-                  return Center(
-                    child: Opacity(
-                      opacity: _logoOpacityAnim.value,
-                      child: Text(
-                        'I L O S I',
-                        style: const TextStyle(
-                          fontFamily: 'Manrope',
-                          fontWeight: FontWeight.w300, // Light weight
-                          fontSize: 54,
-                          color: Colors.black,
-                          letterSpacing: 6.0,
-                        ),
-                      ),
+            AnimatedBuilder(
+              animation: Listenable.merge([_mainController, _glowController]),
+              builder: (context, child) {
+                return CustomPaint(
+                  painter: IlosiSplashPainter(
+                    animation: _mainAnimation,
+                    glowIntensity: _glowAnimation.value,
+                  ),
+                  size: Size.infinite,
+                );
+              },
+            ),
+            // 터치 안내 텍스트
+            Positioned(
+              bottom: 100,
+              left: 0,
+              right: 0,
+              child: AnimatedOpacity(
+                opacity: _mainAnimation.value,
+                duration: const Duration(milliseconds: 500),
+                child: Center(
+                  child: Text(
+                    '터치하여 시작',
+                    style: TextStyle(
+                      color: const Color(0xFF00FFFF).withOpacity(0.6),
+                      fontSize: 18,
+                      fontFamily: 'Manrope',
+                      fontWeight: FontWeight.w300,
+                      letterSpacing: 1.0,
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
+            ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _navigateToNextScreen() {
-    // 인증 상태 확인
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    
-    Widget nextScreen;
-    if (authProvider.isAuthenticated) {
-      // 인증된 사용자: 로비 화면으로 이동
-      nextScreen = const LobbyScreen();
-    } else {
-      // 인증되지 않은 사용자: 로그인 화면으로 이동
-      nextScreen = const LoginPage();
-    }
-    
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => nextScreen,
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
-        },
-        transitionDuration: const Duration(milliseconds: 500),
       ),
     );
   }

@@ -389,6 +389,7 @@ class GoStopBoard extends StatefulWidget {
   // 플레이어가 직접 GO/STOP 선택해야 할 때 자동 호출을 막기 위한 플래그
   final bool autoGoStop; // true: onGo 콜백을 자동 실행, false: 사용자가 직접 눌러야 함
   final bool? showDeck; // showDeck 속성 추가
+  final List<dynamic>? actualDeckCards; // 실제 카드더미 카드 데이터 (분배 애니메이션용)
   
   // 밤일낮장 관련 매개변수들
   final bool isPreGameSelection; // 밤일낮장 단계 여부
@@ -437,6 +438,7 @@ class GoStopBoard extends StatefulWidget {
     this.bonusCard,
     this.engine,
     this.showDeck,
+    this.actualDeckCards, // 실제 카드더미 카드 데이터
     // 밤일낮장 관련 매개변수들
     this.isPreGameSelection = false,
     this.preGameCards,
@@ -855,6 +857,7 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
               controller: widget.cardStackController,
               showCountLabel: true,
               visible: widget.showDeck ?? true, // showDeck 속성 전달
+              actualCards: widget.actualDeckCards, // 실제 카드 데이터 전달
             ),
           ),
         );

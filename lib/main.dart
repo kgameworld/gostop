@@ -12,10 +12,9 @@ import 'lobby_screen.dart';
 import 'screens/shop_page.dart';
 import 'screens/legal/privacy_policy_page.dart';
 import 'screens/legal/terms_of_service_page.dart';
-import 'screens/splash_screen.dart';
+import 'screens/apple_grade_splash_screen.dart';
 import 'providers/locale_provider.dart';
 import 'l10n/app_localizations.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -91,8 +90,10 @@ class GoStopApp extends StatelessWidget {
           supportedLocales: AppLocalizations.supportedLocales,
           home: const AuthWrapper(),
           routes: {
-            '/login': (context) => const LoginPage(),
+            // 로그인 라우트 비활성화
+            // '/login': (context) => const LoginPage(),
             '/home': (context) => const LobbyScreen(),
+            '/lobby': (context) => const LobbyScreen(),
             '/shop': (context) => const ShopPage(),
             '/privacy': (context) => const PrivacyPolicyPage(),
             '/terms': (context) => const TermsOfServicePage(),
@@ -118,13 +119,8 @@ class AuthWrapper extends StatelessWidget {
           );
         }
         
-        if (authProvider.isAuthenticated) {
-          // 인증된 사용자: 스플래시 스크린 → 메인 화면으로 이동
-          return const SplashScreen();
-        } else {
-          // 인증되지 않은 사용자: 로그인 화면으로 이동
-          return const LoginPage();
-        }
+        // 스플래시 스크린 비활성화 - 바로 로비로 이동
+        return const LobbyScreen();
       },
     );
   }
