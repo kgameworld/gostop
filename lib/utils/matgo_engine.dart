@@ -3,7 +3,6 @@ import 'event_evaluator.dart';
 import 'deck_manager.dart';
 import 'game_logger.dart';
 import '../utils/sound_manager.dart';
-import 'dart:async';
 
 // 게임의 현재 단계를 나타내는 열거형
 enum TurnPhase {
@@ -582,15 +581,6 @@ class MatgoEngine {
       return; // 보너스피 처리 후 즉시 반환 (다음 로직은 onComplete에서 실행)
     }
 
-    // 뒤집은 결과가 없거나(모두 보너스) 더는 카드가 없으면 턴 종료 처리
-    if (drawnCard == null) {
-      // 보너스피가 아닌 카드가 나올 때까지 반복 완료
-      logger.addLog(currentPlayer, 'flippingCard', LogLevel.info, '[DEBUG] 카드더미 소진: 보너스피만 뒤집힘');
-      checkReverseGo();
-      _endTurn();
-      return;
-    }
-
     // 보너스피가 아닌 카드가 나온 경우: 일반카드 뒤집었을 때 알고리즘 실행
 
     logger.addLog(currentPlayer, 'flippingCard', LogLevel.info, '카드 뒤집음: ${drawnCard.id}(${drawnCard.name})');
@@ -1075,7 +1065,7 @@ class MatgoEngine {
         final int prevScore = (lastGoScore ?? 7);
         if (score >= prevScore + 1) {
           logger.addLog(currentPlayer, 'turnEnd', LogLevel.info,
-              '점수 상승(${prevScore}→$score): GO/STOP 선택 대기');
+              '점수 상승($prevScore→$score): GO/STOP 선택 대기');
           return true;
         }
       }

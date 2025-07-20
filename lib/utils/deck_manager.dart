@@ -6,6 +6,7 @@ class DeckManager {
   final int playerCount;
   final bool isMatgo;
   List<GoStopCard> fullDeck = [];
+  List<GoStopCard> animationDeck = []; // 애니메이션용 덱 추가
   final Map<int, List<GoStopCard>> playerHands = {};
   final List<GoStopCard> fieldCards = [];
   final List<GoStopCard> drawPile = [];
@@ -16,7 +17,32 @@ class DeckManager {
     if (playerCount < 2 || playerCount > 3) {
       throw Exception('GoStop supports only 2 or 3 players.');
     }
-    reset();
+    // 애니메이션을 위해 자동 분배하지 않음
+    _initializeDeck();
+  }
+
+  // 덱 초기화 (분배하지 않음)
+  void _initializeDeck() {
+    // 모든 상태 초기화
+    playerHands.clear();
+    fieldCards.clear();
+    drawPile.clear();
+    capturedCards.clear();
+    
+    // 손패 초기화 (중요!)
+    for (int i = 0; i < playerCount; i++) {
+      playerHands[i] = [];
+      capturedCards[i] = [];
+    }
+    
+    fullDeck = List.from(goStopCards.where((card) => card.type != 'back'));
+    animationDeck = List.from(fullDeck); // 애니메이션용 덱도 초기화
+    
+    // 실제 게임 덱에 모든 카드 추가 (중요!)
+    drawPile.addAll(fullDeck);
+    
+    // 덱 셔플 (중요!)
+    shuffle();
   }
 
   void reset() {
@@ -32,6 +58,12 @@ class DeckManager {
     _setupGame();
   }
 
+  // 카드 분배 애니메이션을 위한 public 메서드
+  void setupGameAfterAnimation() {
+    // 애니메이션에서 사용된 카드들을 실제로 분배
+    deal();
+  }
+
   void _setupGame() {
     shuffle();
     deal();
@@ -39,6 +71,8 @@ class DeckManager {
 
   void shuffle() {
     fullDeck.shuffle(random);
+    animationDeck = List.from(fullDeck); // 애니메이션용 덱도 함께 셔플
+    drawPile.shuffle(random); // 실제 게임 덱도 셔플
   }
 
   void deal() {

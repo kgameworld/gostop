@@ -23,7 +23,7 @@ class DealAnimationWidget extends StatefulWidget {
 class _DealAnimationWidgetState extends State<DealAnimationWidget> with TickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
-  int _step = 0;
+  final int _step = 0;
 
   @override
   void initState() {

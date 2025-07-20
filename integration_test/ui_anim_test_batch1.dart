@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:go_stop_app/main.dart' as app;
 import 'package:go_stop_app/screens/gostop_board.dart';
-import 'dart:math';
 
 // 120Hz 시뮬레이션 헬퍼
 Future<void> pumpAndSettle120Hz(WidgetTester tester, Duration duration) async {

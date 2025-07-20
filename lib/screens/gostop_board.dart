@@ -97,7 +97,7 @@ Widget capturedOverlapRow(BuildContext context, Map<String, List<String>> captur
   final rowGap = cardHeight * 0.6;
 
   // 피 점수 계산 함수 (일반피=1, 쌍피=2, 쓰리피=3, 보너스 포함)
-  int _calculatePiScore(List<String> piCards) {
+  int calculatePiScore(List<String> piCards) {
     int totalScore = 0;
     for (final cardPath in piCards) {
       if (cardPath.contains('bonus_3pi') || (cardPath.contains('3pi') && cardPath.contains('bonus'))) {
@@ -147,7 +147,7 @@ Widget capturedOverlapRow(BuildContext context, Map<String, List<String>> captur
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '${_calculatePiScore(list)}',
+                  '${calculatePiScore(list)}',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: cardHeight * 0.22,
@@ -194,7 +194,7 @@ Widget capturedOverlapRow(BuildContext context, Map<String, List<String>> captur
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          '${_calculatePiScore(list)}',
+                          '${calculatePiScore(list)}',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: cardHeight * 0.19,
@@ -243,8 +243,8 @@ class _AnimatedDrawnCard extends StatefulWidget {
     required this.start,
     required this.end,
     required this.flip,
-    this.onEnd,
     required this.toCaptured,
+    this.onEnd,
     this.capturedOffset,
   });
   @override
@@ -388,6 +388,23 @@ class GoStopBoard extends StatefulWidget {
   final dynamic engine;
   // 플레이어가 직접 GO/STOP 선택해야 할 때 자동 호출을 막기 위한 플래그
   final bool autoGoStop; // true: onGo 콜백을 자동 실행, false: 사용자가 직접 눌러야 함
+  final bool? showDeck; // showDeck 속성 추가
+  
+  // 밤일낮장 관련 매개변수들
+  final bool isPreGameSelection; // 밤일낮장 단계 여부
+  final List<GoStopCard>? preGameCards; // 밤일낮장용 6장 카드
+  final int? selectedCardIndex; // 플레이어가 선택한 카드 인덱스
+  final bool? isPlayerCardSelected; // 플레이어 카드 선택 여부
+  final bool? isAiCardSelected; // AI 카드 선택 여부
+  final GoStopCard? playerSelectedCard; // 플레이어가 선택한 카드
+  final GoStopCard? aiSelectedCard; // AI가 선택한 카드
+  final Function(int)? onPreGameCardTap; // 밤일낮장 카드 탭 콜백
+  
+  // 밤일낮장 결과 표시 관련 매개변수들
+  final bool? showPreGameResult; // 밤일낮장 결과 표시 여부
+  final String? preGameResultMessage; // 결과 메시지
+  final bool? isPlayerFirst; // 플레이어가 선인지 여부
+  final int? resultDisplayDuration; // 결과 표시 지속 시간 (초)
 
   const GoStopBoard({
     super.key,
@@ -419,6 +436,20 @@ class GoStopBoard extends StatefulWidget {
     this.fieldStackKey,
     this.bonusCard,
     this.engine,
+    this.showDeck,
+    // 밤일낮장 관련 매개변수들
+    this.isPreGameSelection = false,
+    this.preGameCards,
+    this.selectedCardIndex,
+    this.isPlayerCardSelected,
+    this.isAiCardSelected,
+    this.playerSelectedCard,
+    this.aiSelectedCard,
+    this.onPreGameCardTap,
+    this.showPreGameResult,
+    this.preGameResultMessage,
+    this.isPlayerFirst,
+    this.resultDisplayDuration,
   });
 
   @override
@@ -718,8 +749,13 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   }
 
   Widget _fieldZone() {
-    // 필드 zone 디버깅 로그 추가
-    print('[필드 zone] 현재 필드 카드: ${widget.tableCards.map((c) => '${c.id}(${c.name})[월${c.month}]').join(', ')}');
+    // 밤일낮장 단계일 때는 밤일낮장 카드들을 표시
+    if (widget.isPreGameSelection && widget.preGameCards != null) {
+      return _buildPreGameFieldZone();
+    }
+    
+    // 필드 zone 디버깅 로그 제거 (무한 루프 방지)
+    // print('[필드 zone] 현재 필드 카드: ${widget.tableCards.map((c) => '${c.id}(${c.name})[월${c.month}]').join(', ')}');
 
     // 1. 카드를 월별로 그룹화
     final Map<int, List<GoStopCard>> monthlyCards = {};
@@ -818,8 +854,7 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
               emptyDeckImage: widget.deckBackImage,
               controller: widget.cardStackController,
               showCountLabel: true,
-              width: deckWidth,
-              height: deckHeight,
+              visible: widget.showDeck ?? true, // showDeck 속성 전달
             ),
           ),
         );
@@ -834,15 +869,119 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     );
   }
 
+  // 밤일낮장 필드 영역 구현
+  Widget _buildPreGameFieldZone() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minSide = constraints.maxWidth < constraints.maxHeight ? constraints.maxWidth : constraints.maxHeight;
+        final cardWidth = minSide * 0.08; // 필드 영역에 맞게 크기 조정
+        final cardHeight = cardWidth * 1.5;
+        final cardGap = cardWidth * 0.2; // 간격도 조정
+        
+        // 3x2 그리드로 6장 카드 배치
+        final gridWidth = (cardWidth * 3) + (cardGap * 2);
+        final gridHeight = (cardHeight * 2) + cardGap;
+        
+        // 중앙 정렬을 위한 오프셋 계산
+        final offsetX = (constraints.maxWidth - gridWidth) / 2;
+        final offsetY = (constraints.maxHeight - gridHeight) / 2;
+        
+        List<Widget> cardWidgets = [];
+        
+        for (int i = 0; i < widget.preGameCards!.length; i++) {
+          final card = widget.preGameCards![i];
+          final row = i ~/ 3;
+          final col = i % 3;
+          final isSelected = widget.selectedCardIndex == i;
+          final isPlayerCard = widget.isPlayerCardSelected == true && widget.selectedCardIndex == i;
+          final isAiCard = widget.isAiCardSelected == true && widget.aiSelectedCard == card;
+          
+          final left = offsetX + col * (cardWidth + cardGap);
+          final top = offsetY + row * (cardHeight + cardGap);
+          
+          cardWidgets.add(
+            Positioned(
+              left: left,
+              top: top,
+              child: GestureDetector(
+                onTap: () => widget.onPreGameCardTap?.call(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  transform: Matrix4.identity()
+                    ..scale(isSelected ? 1.1 : 1.0)
+                    ..translate(0.0, isSelected ? -5.0 : 0.0), // 선택 시 위로 올라가는 정도 줄임
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: isSelected 
+                            ? Colors.amber.withOpacity(0.8)
+                            : Colors.black.withOpacity(0.3),
+                          blurRadius: isSelected ? 8 : 4, // 그림자 크기 줄임
+                          offset: const Offset(1, 2), // 그림자 오프셋 줄임
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        children: [
+                          // 카드 이미지
+                          CardWidget(
+                            imageUrl: isPlayerCard || isAiCard 
+                              ? card.imageUrl 
+                              : 'assets/cards/back.png',
+                            width: cardWidth,
+                            height: cardHeight,
+                          ),
+                          // 선택 표시
+                          if (isSelected)
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: Icon(
+                                    isPlayerCard ? Icons.person : Icons.computer,
+                                    color: Colors.amber,
+                                    size: cardWidth * 0.25, // 아이콘 크기 줄임
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: Stack(
+            children: cardWidgets,
+          ),
+        );
+      },
+    );
+  }
+
   Widget _myCapturedRow() {
-    // 획득 zone 디버깅 로그 추가
-    print('[획득 zone] 플레이어 획득 카드: ${widget.playerCaptured.entries.map((e) => '${e.key}: ${e.value.length}장').join(', ')}');
+    // 획득 zone 디버깅 로그 제거 (무한 루프 방지)
+    // print('[획득 zone] 플레이어 획득 카드: ${widget.playerCaptured.entries.map((e) => '${e.key}: ${e.value.length}장').join(', ')}');
     return capturedOverlapRow(context, widget.playerCaptured, isPlayer: true, capturedKeys: playerCapturedKeys);
   }
 
   Widget _opponentCapturedRow() {
-    // AI 획득 zone 디버깅 로그 추가
-    print('[획득 zone] AI 획득 카드: ${widget.opponentCaptured.entries.map((e) => '${e.key}: ${e.value.length}장').join(', ')}');
+    // AI 획득 zone 디버깅 로그 제거 (무한 루프 방지)
+    // print('[획득 zone] AI 획득 카드: ${widget.opponentCaptured.entries.map((e) => '${e.key}: ${e.value.length}장').join(', ')}');
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -1131,8 +1270,7 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
               emptyDeckImage: widget.deckBackImage,
               controller: widget.cardStackController,
               showCountLabel: true,
-              width: deckCardWidth,
-              height: fieldCardHeight,
+              visible: widget.showDeck ?? true, // showDeck 속성 전달
             ),
           ),
         );
@@ -1312,7 +1450,7 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
-                            '${goCount}${AppLocalizations.of(context)!.go}',
+                            '$goCount${AppLocalizations.of(context)!.go}',
                             style: badgeTextStyle.copyWith(color: goCount > 0 ? Colors.yellow : Colors.grey),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -1717,19 +1855,26 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     final fieldPanelHeight = screenHeight - (minSide * 0.19) - (minSide * 0.10);
     final scaffold = Scaffold(
       backgroundColor: const Color(0xFF2f4f2f),
-      body: Column(
+      body: Stack(
         children: [
-          buildTopPanel(),
-          SizedBox(
-            height: fieldPanelHeight,
-            child: Row(
-              children: [
-                Expanded(flex: 7, child: buildFieldArea()), // 필드 영역 70%
-                Expanded(flex: 3, child: buildLeftPanel()), // 플레이어박스/획득카드 패널 30%
-              ],
-            ),
+          Column(
+            children: [
+              buildTopPanel(),
+              SizedBox(
+                height: fieldPanelHeight,
+                child: Row(
+                  children: [
+                    Expanded(flex: 7, child: buildFieldArea()), // 필드 영역 70%
+                    Expanded(flex: 3, child: buildLeftPanel()), // 플레이어박스/획득카드 패널 30%
+                  ],
+                ),
+              ),
+              buildHandPanel(),
+            ],
           ),
-          buildHandPanel(),
+          // 밤일낮장 결과 표시 오버레이
+          if (widget.showPreGameResult == true)
+            _buildPreGameResultOverlay(),
         ],
       ),
     );
@@ -1743,5 +1888,178 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
     }
 
     return scaffold;
+  }
+
+  // 밤일낮장 결과 표시 오버레이
+  Widget _buildPreGameResultOverlay() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final minSide = screenWidth < screenHeight ? screenWidth : screenHeight;
+    
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.7),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // 결과 메시지
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: minSide * 0.05,
+                  vertical: minSide * 0.03,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // 선 결정 결과
+                    Text(
+                      widget.preGameResultMessage ?? '',
+                      style: TextStyle(
+                        fontSize: minSide * 0.035,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: minSide * 0.02),
+                    // 선 플레이어 표시
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          widget.isPlayerFirst == true ? Icons.person : Icons.computer,
+                          color: Colors.blue,
+                          size: minSide * 0.04,
+                        ),
+                        SizedBox(width: minSide * 0.01),
+                        Text(
+                          widget.isPlayerFirst == true ? '플레이어' : 'AI',
+                          style: TextStyle(
+                            fontSize: minSide * 0.03,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        Text(
+                          '가 선입니다!',
+                          style: TextStyle(
+                            fontSize: minSide * 0.03,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: minSide * 0.02),
+                    // 카운트다운
+                    Text(
+                      '${3 - (widget.resultDisplayDuration ?? 0)}초 후 게임 시작...',
+                      style: TextStyle(
+                        fontSize: minSide * 0.025,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: minSide * 0.05),
+              // 선택된 카드들 표시
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // 플레이어 카드
+                  if (widget.playerSelectedCard != null)
+                    Container(
+                      margin: EdgeInsets.only(right: minSide * 0.02),
+                      child: Column(
+                        children: [
+                          Text(
+                            '플레이어',
+                            style: TextStyle(
+                              fontSize: minSide * 0.025,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: minSide * 0.01),
+                          CardWidget(
+                            imageUrl: widget.playerSelectedCard!.imageUrl,
+                            width: minSide * 0.08,
+                            height: minSide * 0.12,
+                          ),
+                          SizedBox(height: minSide * 0.01),
+                          Text(
+                            '${widget.playerSelectedCard!.month}월',
+                            style: TextStyle(
+                              fontSize: minSide * 0.025,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  // VS 표시
+                  Container(
+                    margin: EdgeInsets.symmetric(horizontal: minSide * 0.02),
+                    child: Text(
+                      'VS',
+                      style: TextStyle(
+                        fontSize: minSide * 0.04,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  // AI 카드
+                  if (widget.aiSelectedCard != null)
+                    Container(
+                      margin: EdgeInsets.only(left: minSide * 0.02),
+                      child: Column(
+                        children: [
+                          Text(
+                            'AI',
+                            style: TextStyle(
+                              fontSize: minSide * 0.025,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: minSide * 0.01),
+                          CardWidget(
+                            imageUrl: widget.aiSelectedCard!.imageUrl,
+                            width: minSide * 0.08,
+                            height: minSide * 0.12,
+                          ),
+                          SizedBox(height: minSide * 0.01),
+                          Text(
+                            '${widget.aiSelectedCard!.month}월',
+                            style: TextStyle(
+                              fontSize: minSide * 0.025,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
