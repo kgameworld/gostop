@@ -7,6 +7,7 @@ import '../widgets/card_deck_widget.dart';
 import '../widgets/profile_card.dart';
 import '../utils/coin_service.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/animated_card_widget.dart';
 
 // 피 점수 계산 (쌍피, 쓰리피, 보너스 포함)
 int countPiScore(List<String> images) {
@@ -458,7 +459,31 @@ class GoStopBoard extends StatefulWidget {
   State<GoStopBoard> createState() => GoStopBoardState();
 }
 
+// 1. MovableCardEntry 클래스 정의 (파일 상단에 추가)
+class MovableCardEntry {
+  final GoStopCard card; // 카드 데이터
+  Offset position; // 현재 위치
+  CardZone zone; // 손패/필드/이동중 등 상태
+  final GlobalKey key; // 위젯 고유 키
+  AnimationController? animationController; // 이동 애니메이션 컨트롤러
+  int? owner; // 0: 플레이어, 1: AI, null: 필드/공용
+  String? capturedType; // '피', '띠', '광', '동물' 등 (획득시)
+  MovableCardEntry({
+    required this.card,
+    required this.position,
+    required this.zone,
+    required this.key,
+    this.animationController,
+    this.owner,
+    this.capturedType,
+  });
+}
+
+enum CardZone { hand, field, moving, captured, aiHand }
+
 class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  // 전문가 수준: 전체 카드 상태/위치/존(zone) 관리 리스트
+  List<MovableCardEntry> movableCards = [];
   bool showEffect = false;
   int? selectedHandIndex;
   bool isDealing = true;
@@ -603,7 +628,143 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 3. 게임 시작 시 손패/필드 카드들을 MovableCardEntry로 초기화
+    _initMovableCards();
     Future.delayed(const Duration(milliseconds: 300), _dealNextCard);
+  }
+
+  void _initMovableCards() {
+    movableCards.clear();
+    // 손패 카드들 추가
+    for (int i = 0; i < widget.playerHand.length; i++) {
+      final card = widget.playerHand[i];
+      movableCards.add(MovableCardEntry(
+        card: card,
+        position: _getHandCardPosition(i), // 손패 위치 계산 함수 필요
+        zone: CardZone.hand,
+        key: GlobalKey(),
+        owner: 0,
+        capturedType: null,
+      ));
+    }
+    // 필드 카드들 추가
+    for (int i = 0; i < widget.tableCards.length; i++) {
+      final card = widget.tableCards[i];
+      movableCards.add(MovableCardEntry(
+        card: card,
+        position: _getFieldCardPosition(card), // 필드 위치 계산 함수 필요
+        zone: CardZone.field,
+        key: GlobalKey(),
+        owner: null,
+        capturedType: null,
+      ));
+    }
+    setState(() {});
+  }
+
+  // 4. 손패/필드 카드 위치 계산 함수 예시 (실제 레이아웃에 맞게 구현 필요)
+  Offset _getHandCardPosition(int index) {
+    // 예시: 손패 영역 기준 x/y 좌표 계산
+    final double x = 60.0 + index * 50.0;
+    final double y = 600.0; // 손패 영역 y좌표(예시)
+    return Offset(x, y);
+  }
+  Offset _getFieldCardPosition(GoStopCard card) {
+    // 예시: 필드 영역에서 월별 위치 계산
+    final int month = card.month;
+    final double x = 200.0 + ((month - 1) % 4) * 60.0;
+    final double y = 200.0 + ((month - 1) ~/ 4) * 90.0;
+    return Offset(x, y);
+  }
+
+  // 5. 카드 이동 애니메이션 트리거 함수
+  void moveCardToField(int handIndex, GoStopCard card) {
+    final entry = movableCards.firstWhere((e) => e.card == card && e.zone == CardZone.hand);
+    entry.zone = CardZone.moving;
+    final controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    final start = entry.position;
+    final end = _getFieldCardPosition(card);
+    entry.animationController = controller;
+    Animation<Offset> animation = Tween<Offset>(begin: start, end: end).animate(CurvedAnimation(parent: controller, curve: Curves.easeInOut));
+    controller.addListener(() {
+      entry.position = animation.value;
+      setState(() {});
+    });
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        entry.zone = CardZone.field;
+        entry.position = end;
+        entry.animationController?.dispose();
+        entry.animationController = null;
+        setState(() {});
+      }
+    });
+    controller.forward();
+  }
+
+  // 6. Stack에서 모든 MovableCardEntry를 위치/상태에 따라 렌더링
+  Widget _buildMovableCardsStack() {
+    return Stack(
+      children: [
+        for (final entry in movableCards)
+          if (entry.zone == CardZone.moving)
+            // 이동중: 애니메이션 적용
+            AnimatedCardWidget(
+              card: entry.card,
+              isFaceUp: false, // 시작은 뒷면
+              startPosition: entry.position,
+              endPosition: _getFieldCardPosition(entry.card),
+              duration: const Duration(milliseconds: 800),
+              withTrail: true,
+              flipAtPercent: 0.5, // 50%에서 앞면으로 전환
+              onComplete: () {
+                setState(() {
+                  entry.zone = CardZone.field;
+                  entry.position = _getFieldCardPosition(entry.card);
+                  entry.animationController?.dispose();
+                  entry.animationController = null;
+                });
+              },
+            )
+          else if (entry.zone == CardZone.captured)
+            // 획득 영역: 플레이어/AI/타입별 위치 계산 필요
+            Positioned(
+              left: entry.position.dx,
+              top: entry.position.dy,
+              child: CardWidget(
+                key: entry.key,
+                imageUrl: entry.card.imageUrl,
+                width: 48, // 필요시 동적으로 조정
+                height: 72,
+              ),
+            )
+          else if (entry.zone == CardZone.aiHand)
+            // AI 손패: AI 손패 영역 내 위치
+            Positioned(
+              left: entry.position.dx,
+              top: entry.position.dy,
+              child: CardWidget(
+                key: entry.key,
+                imageUrl: 'assets/cards/back.png', // AI 손패는 항상 뒷면
+                isFaceDown: true,
+                width: 48 * 0.4,
+                height: 72 * 0.4,
+              ),
+            )
+          else
+            // 손패/필드 등 기타 영역
+            Positioned(
+              left: entry.position.dx,
+              top: entry.position.dy,
+              child: CardWidget(
+                key: entry.key,
+                imageUrl: entry.card.imageUrl,
+                width: 72,
+                height: 108,
+              ),
+            ),
+      ],
+    );
   }
 
   @override
@@ -1878,6 +2039,7 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
           // 밤일낮장 결과 표시 오버레이
           if (widget.showPreGameResult == true)
             _buildPreGameResultOverlay(),
+          _buildMovableCardsStack(), // 7. 전체 카드 Stack 추가
         ],
       ),
     );
@@ -2063,6 +2225,265 @@ class GoStopBoardState extends State<GoStopBoard> with SingleTickerProviderState
           ),
         ),
       ),
+    );
+  }
+
+  // 8. AI가 손패에서 카드를 낼 때 호출하는 함수 예시
+  void aiPlayCard(int handIndex) {
+    final card = widget.playerHand[handIndex];
+    moveCardToField(handIndex, card);
+  }
+
+  // 4. 획득 영역(플레이어/AI) 렌더링 함수: MovableCardEntry 기반
+  Widget buildCapturedZone({required bool isPlayer, required String type, required double cardWidth, required double cardHeight, double overlapX = 20, double rowGap = 40, int maxPerRow = 5}) {
+    final owner = isPlayer ? 0 : 1;
+    // zone/capturedType/owner별로 카드 추출
+    final capturedCards = movableCards
+      .where((e) => e.zone == CardZone.captured && e.owner == owner && e.capturedType == type)
+      .toList();
+    // 행/열 배치 계산
+    final rows = ((capturedCards.length - 1) ~/ maxPerRow) + 1;
+    return SizedBox(
+      width: cardWidth + overlapX * (maxPerRow - 1),
+      height: cardHeight + (rows - 1) * rowGap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (int idx = 0; idx < capturedCards.length; idx++)
+            Positioned(
+              left: (idx % maxPerRow) * overlapX,
+              top: (idx ~/ maxPerRow) * rowGap,
+              child: CardWidget(
+                key: capturedCards[idx].key,
+                imageUrl: capturedCards[idx].card.imageUrl,
+                width: cardWidth,
+                height: cardHeight,
+              ),
+            ),
+          // 피일 때 점수 뱃지 표시
+          if (type == '피' && capturedCards.isNotEmpty)
+            Positioned(
+              right: 0,
+              top: -cardHeight * 0.11,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: cardWidth * 0.17, vertical: cardHeight * 0.06),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(cardHeight * 0.17),
+                  border: Border.all(color: Colors.black, width: 1),
+                ),
+                child: Text(
+                  '${capturedCards.length}', // 실제 점수 계산 로직 필요시 교체
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                    fontSize: cardHeight * 0.22,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 5. AI 손패 렌더링 함수: MovableCardEntry 기반
+  Widget buildAiHandZone({required double cardWidth, required double cardHeight, double gap = 4, double verticalGap = 8}) {
+    final aiHandCards = movableCards
+      .where((e) => e.zone == CardZone.aiHand && e.owner == 1)
+      .toList();
+    // 2줄 배치
+    final cardsPerRow = (aiHandCards.length / 2).ceil();
+    final firstRowCards = cardsPerRow;
+    final secondRowCards = aiHandCards.length - firstRowCards;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(firstRowCards, (i) =>
+            Padding(
+              padding: EdgeInsets.only(right: i == firstRowCards - 1 ? 0 : gap),
+              child: aiHandCards.length > i
+                ? CardWidget(
+                    key: aiHandCards[i].key,
+                    imageUrl: 'assets/cards/back.png',
+                    isFaceDown: true,
+                    width: cardWidth,
+                    height: cardHeight,
+                  )
+                : const SizedBox.shrink(),
+            )
+          ),
+        ),
+        if (secondRowCards > 0) ...[
+          SizedBox(height: verticalGap),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(secondRowCards, (i) =>
+              Padding(
+                padding: EdgeInsets.only(right: i == secondRowCards - 1 ? 0 : gap),
+                child: aiHandCards.length > firstRowCards + i
+                  ? CardWidget(
+                      key: aiHandCards[firstRowCards + i].key,
+                      imageUrl: 'assets/cards/back.png',
+                      isFaceDown: true,
+                      width: cardWidth,
+                      height: cardHeight,
+                    )
+                  : const SizedBox.shrink(),
+              )
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // 1. 카드가 필드에서 획득 zone으로 이동할 때 AnimatedCardWidget을 활용한 이동 애니메이션 추가
+  void animateCardToCaptured(MovableCardEntry entry, Offset capturedOffset, int owner, String capturedType) {
+    // zone을 임시로 moving으로 변경하여 AnimatedCardWidget으로 이동 애니메이션 적용
+    entry.zone = CardZone.moving;
+    final start = entry.position;
+    final end = capturedOffset;
+    final controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    entry.animationController = controller;
+    Animation<Offset> animation = Tween<Offset>(begin: start, end: end).animate(CurvedAnimation(parent: controller, curve: Curves.easeInOut));
+    controller.addListener(() {
+      entry.position = animation.value;
+      setState(() {});
+    });
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        entry.zone = CardZone.captured;
+        entry.position = end;
+        entry.owner = owner;
+        entry.capturedType = capturedType;
+        entry.animationController?.dispose();
+        entry.animationController = null;
+        setState(() {});
+      }
+    });
+    controller.forward();
+  }
+
+  // 2. 획득 zone 내 카드 AnimatedPositioned로 정렬/삽입 애니메이션 적용
+  Widget buildCapturedZone({required bool isPlayer, required String type, required double cardWidth, required double cardHeight, double overlapX = 20, double rowGap = 40, int maxPerRow = 5}) {
+    final owner = isPlayer ? 0 : 1;
+    // zone/capturedType/owner별로 카드 추출
+    final capturedCards = movableCards
+      .where((e) => e.zone == CardZone.captured && e.owner == owner && e.capturedType == type)
+      .toList();
+    // 행/열 배치 계산
+    final rows = ((capturedCards.length - 1) ~/ maxPerRow) + 1;
+    return SizedBox(
+      width: cardWidth + overlapX * (maxPerRow - 1),
+      height: cardHeight + (rows - 1) * rowGap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (int idx = 0; idx < capturedCards.length; idx++)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeInOut,
+              left: (idx % maxPerRow) * overlapX,
+              top: (idx ~/ maxPerRow) * rowGap,
+              child: CardWidget(
+                key: capturedCards[idx].key,
+                imageUrl: capturedCards[idx].card.imageUrl,
+                width: cardWidth,
+                height: cardHeight,
+              ),
+            ),
+          // 피일 때 점수 뱃지 표시
+          if (type == '피' && capturedCards.isNotEmpty)
+            Positioned(
+              right: 0,
+              top: -cardHeight * 0.11,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: cardWidth * 0.17, vertical: cardHeight * 0.06),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(cardHeight * 0.17),
+                  border: Border.all(color: Colors.black, width: 1),
+                ),
+                child: Text(
+                  '${capturedCards.length}', // 실제 점수 계산 로직 필요시 교체
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                    fontSize: cardHeight * 0.22,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 3. _buildMovableCardsStack에서 zone==CardZone.moving일 때 AnimatedCardWidget이 필드→획득 zone 이동에도 사용될 수 있도록 확장
+  Widget _buildMovableCardsStack() {
+    return Stack(
+      children: [
+        for (final entry in movableCards)
+          if (entry.zone == CardZone.moving)
+            // 이동중: 애니메이션 적용
+            AnimatedCardWidget(
+              card: entry.card,
+              isFaceUp: false, // 시작은 뒷면
+              startPosition: entry.position,
+              endPosition: _getFieldCardPosition(entry.card),
+              duration: const Duration(milliseconds: 800),
+              withTrail: true,
+              flipAtPercent: 0.5, // 50%에서 앞면으로 전환
+              onComplete: () {
+                setState(() {
+                  entry.zone = CardZone.field;
+                  entry.position = _getFieldCardPosition(entry.card);
+                  entry.animationController?.dispose();
+                  entry.animationController = null;
+                });
+              },
+            )
+          else if (entry.zone == CardZone.captured)
+            // 획득 영역: 플레이어/AI/타입별 위치 계산 필요
+            Positioned(
+              left: entry.position.dx,
+              top: entry.position.dy,
+              child: CardWidget(
+                key: entry.key,
+                imageUrl: entry.card.imageUrl,
+                width: 48, // 필요시 동적으로 조정
+                height: 72,
+              ),
+            )
+          else if (entry.zone == CardZone.aiHand)
+            // AI 손패: AI 손패 영역 내 위치
+            Positioned(
+              left: entry.position.dx,
+              top: entry.position.dy,
+              child: CardWidget(
+                key: entry.key,
+                imageUrl: 'assets/cards/back.png', // AI 손패는 항상 뒷면
+                isFaceDown: true,
+                width: 48 * 0.4,
+                height: 72 * 0.4,
+              ),
+            )
+          else
+            // 손패/필드 등 기타 영역
+            Positioned(
+              left: entry.position.dx,
+              top: entry.position.dy,
+              child: CardWidget(
+                key: entry.key,
+                imageUrl: entry.card.imageUrl,
+                width: 72,
+                height: 108,
+              ),
+            ),
+      ],
     );
   }
 }
